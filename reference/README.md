@@ -1,9 +1,7 @@
 # Reference host shim
 
-A minimal **L1 host** for showcard, in plain ES modules: no build step, no
-runtime dependencies beyond Node's own built-ins for the parts that genuinely
-serve a package over HTTP. It exists to demonstrate that the specification is
-implementable on its own, and to give an embedder a working starting point.
+A minimal **L1 host** for showcard, in plain ES modules. Node built-ins are
+used only for the HTTP package listener.
 
 Two ways to mount a card, and one thing they share: the injection layer never
 touches disk or network on its own — a host puts it into the response bytes
@@ -14,8 +12,8 @@ that is on the host side, never inside the card.
   (section 6.2's degenerate package). The document goes into an iframe's
   `srcdoc`, injected first. No serving required; this is the mount for a card
   that is nothing but its own `index.html`.
-- **`mountPackage`** — a real package, `index.html` plus its own `assets/`
-  (section 1.1). The iframe is pointed at a real served URL instead, so the
+- **`mountPackage`** — a package, `index.html` plus its own `assets/`
+  (section 1.1). The iframe is pointed at a served URL, so the
   package's relative references (`assets/style.css`, and so on) resolve the
   ordinary way a browser resolves any relative reference: against the
   document's own address. Serving the package — the part that makes that URL
@@ -46,12 +44,10 @@ that is on the host side, never inside the card.
 </script>
 ```
 
-`cardSource` is always a whole document now — `<!DOCTYPE html>`, `<html>`,
-`<head>`, `<body>`, all of it (section 1.1). There is no fragment form to
-wrap any more; an author writes the same complete document they would write
-for any web page.
+`cardSource` is a complete document: `<!DOCTYPE html>`, `<html>`, `<head>`,
+and `<body>` (section 1.1).
 
-## Serving a real package
+## Serving a package
 
 Run `npm run demo` from the repository root for the complete browser/server example.
 [`examples/host/server.mjs`](../examples/host/server.mjs) runs in Node;
@@ -83,7 +79,7 @@ envelope: `{ ok: false, code, error, result: {} }`.
 | Export | From | What it does |
 |--------|------|--------------|
 | `mountCard(options)` | `src/host.js` | renders a degenerate package (a single document, `srcdoc`) in a sandboxed iframe and opens its socket; returns `{ iframe, dispatch, unmount }` |
-| `mountPackage(options)` | `src/host.js` | same, but `src` rather than `srcdoc` — for a package a host is genuinely serving |
+| `mountPackage(options)` | `src/host.js` | uses `src` rather than `srcdoc` for a served package |
 | `createMemoryStateStore()` | `src/host.js` | state for the lifetime of the page |
 | `createLocalStorageStateStore(storage?)` | `src/host.js` | state that survives a restart |
 | `createCapabilityDispatcher(options)` | `src/host.js` | the request handler on its own, without an iframe |
@@ -167,8 +163,6 @@ straight off the disk, so serve this folder over HTTP with any static file
 server and open `demo.html` from there; the page says so itself if it was
 opened the other way.
 
-`test/serve.test.js` exercises `createPackageHost` directly (routing, ETag,
-Range, the per-instance policy) with no server involved; `test/node-serve.test.js`
-is the round-trip proof — a real `node:http` server, a real package with a
-relative-path asset, and a real browser engine (jsdom, configured to
-genuinely fetch subresources) loading it the way a browser would.
+`test/serve.test.js` covers routing, ETag, Range and per-instance policy.
+`test/node-serve.test.js` covers a Node HTTP round trip with a package and a
+relative asset.

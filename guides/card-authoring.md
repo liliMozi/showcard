@@ -17,7 +17,6 @@ npm run demo
 Open the loopback address printed by the server. Edit the note, leave the field,
 reload the host page, and check that the note remains. Press the time button:
 the card invokes `demo.time.now` in the host and receives an ISO timestamp.
-The demo has no network tool, API key or LLM request.
 
 The authoring files are [examples/host/card/](../examples/host/card/):
 
@@ -59,10 +58,6 @@ Both current source commands accept an entry file, a package directory or a
 directories. Exit 0 means no errors (warnings may remain); 1 means invalid card
 content; 2 means the command could not inspect its target.
 
-The npm registry may lag this checkout. Use the source commands above to reproduce
-this repository's behavior; [CLI documentation](../packages/showcard/README.md)
-distinguishes the source version from the published package.
-
 ## Open and share
 
 A source package is HTML that a browser can render; `data-persist` and the `card`
@@ -76,5 +71,3 @@ state through the host before sharing; the recipient imports a new independent
 entity with no inherited grants. Do not promise that a closed card continues running.
 
 Keep reusable authoring instructions in a [Recipe / Skill](../creator/README.md).
-This is separate from the runtime API; UI language can be an author-defined state
-field, and changing it must not translate or overwrite the user's own note.

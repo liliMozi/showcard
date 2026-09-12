@@ -241,14 +241,10 @@
       <h1>showcard</h1>
       <p class="hero-line en">Agents could speak, and act.<br>Now they can <em>show</em>.</p>
       <p class="hero-line zh">Agent 会说，也会做。<br>现在，它开始<em>展示</em>。</p>
-      <p class="hero-sub en">Between plain HTML and a plugin system there has always been an empty seat:
-        something as light to write as a Skill, that still does most of what a plugin does. showcard
-        fills that seat.</p>
-      <p class="hero-sub zh">在纯 HTML 和插件系统之间，一直缺一个位置：写起来和写一个 Skill 一样轻，却能干插件的大部分活。showcard 补的就是这个位置。</p>
-      <p class="hero-sub en">It is an open standard for HTML-first interactive cards. A card can be one
-        <code>.card.html</code> file or a package with its own assets. A single-file card opens in any browser with a double-click — and inside your agent it
-        gains three powers: it can call tools, keep its state, and travel as a file. The specification and reference code are open source (CC BY + MIT).</p>
-      <p class="hero-sub zh">它是 HTML 交互卡片的开放标准：可以是单文件 <code>.card.html</code>，也可以是带图片等资产的目录包。单文件卡片双击即可打开；放进你的 Agent，它多出三样本事——能调用工具、能把状态存下来、能整个文件发给别人。规范与参考代码开源（CC BY + MIT）。</p>
+      <p class="hero-sub en">Generative UI, as easy to write as a Skill.</p>
+      <p class="hero-sub zh">生成式 UI，像 Skill 一样好写。</p>
+      <p class="hero-sub en">Showcard is an open standard for interactive HTML cards. Create a Mini App that calls tools, saves its state, and travels as a file.</p>
+      <p class="hero-sub zh">Showcard 是交互式 HTML 卡片的开放标准。做出一个能调用工具、保存状态、随时分享的 Mini App。</p>
       <p class="ctas">
         <a class="cta en" href="https://github.com/liliMozi/showcard/blob/main/spec/1.0.en.md">Read the specification</a>
         <a class="cta zh" href="https://github.com/liliMozi/showcard/blob/main/spec/1.0.md">阅读规范</a>
@@ -268,18 +264,18 @@
       <div class="cards">
         <figure>
           <div class="card-frame"><iframe data-showcard="weather" src="examples/weather/index.html" sandbox="allow-scripts" loading="lazy" title="Shanghai weather card" scrolling="no"></iframe></div>
-          <figcaption class="en">Connect to websites through host capabilities and bring fresh data into the card. This preview shows a sample forecast.</figcaption>
-          <figcaption class="zh">通过宿主能力访问网站，把最新数据带进卡片。这张预览展示的是示例天气。</figcaption>
+          <figcaption class="en">Connect to websites through host capabilities.</figcaption>
+          <figcaption class="zh">通过宿主能力访问网站。</figcaption>
         </figure>
         <figure>
           <div class="card-frame"><iframe data-showcard="piano" src="examples/piano/index.html" sandbox="allow-scripts" loading="lazy" title="Two-octave piano card" scrolling="no"></iframe></div>
-          <figcaption class="en">It can even make sound. Play two octaves right here, with a mouse, touch, or your keyboard.</figcaption>
-          <figcaption class="zh">它甚至还能发出声音。用鼠标、触摸或电脑键盘，直接弹奏两个八度。</figcaption>
+          <figcaption class="en">Play it. It makes sound.</figcaption>
+          <figcaption class="zh">弹奏一下，它还能发出声音。</figcaption>
         </figure>
         <figure>
           <div class="card-frame"><iframe data-showcard="note" src="examples/note/index.html" sandbox="allow-scripts" loading="lazy" title="Paper note card" scrolling="no"></iframe></div>
-          <figcaption class="en">A Great Wall note. Keep its data in local storage and share the whole card as a portable package. <a href="examples/note/ARTWORK.md">Artwork credit</a>.</figcaption>
-          <figcaption class="zh">长城便笺。数据可以在本地持久保存，整张卡片也能轻松分享。<a href="examples/note/ARTWORK.md">图片署名</a>。</figcaption>
+          <figcaption class="en">Save data locally and share the card.</figcaption>
+          <figcaption class="zh">数据保存在本地，卡片随时分享。</figcaption>
         </figure>
       </div>
     </div>
@@ -289,8 +285,8 @@
   <section>
     <div class="wrap">
       <h2><span class="en">Simple, yet powerful.</span><span class="zh">简单，却强大。</span></h2>
-      <p class="body en">Weather panels, timers, checklists, little instruments: an Agent can turn an idea into a Mini App, as easy to author as a Skill, designed to cover 95% of everyday plugin work. Host capabilities give it tools, website access, and persistent state. Yet the result stays yours: an ordinary HTML package you can keep, share, version, and open again. It does not have to disappear into a conversation or stay tied to one platform. Simple to make, powerful to use, and worth keeping.</p>
-      <p class="body zh">天气面板、计时器、清单、小乐器：Agent 能把想法做成 Mini App，像 Skill 一样好写，目标是承接 95% 的日常插件工作。接入宿主，就有了工具、网站访问和持久状态；做出的东西仍是一份属于你的 HTML 包，可以保存、分享、管理版本，也可以日后重新打开。不必消失在聊天记录里，也不必依附某个平台。简单地做出来，强大地用起来，长久地留下来。</p>
+      <p class="body en">As easy to author as a Skill, designed to cover 95% of everyday plugin work. Each card is an HTML package you can keep, share, version, and open again, across conversations and platforms.</p>
+      <p class="body zh">像 Skill 一样好写，目标是承接 95% 的日常插件工作。每张卡片都是一份 HTML 包，可以保存、分享、管理版本，也可以跨越对话与平台，随时重新打开。</p>
     </div>
   </section>
 
@@ -304,10 +300,8 @@
           <span class="rung">L0</span>
           <div>
             <p class="rung-name"><span class="en">Any browser</span><span class="zh">任意浏览器</span></p>
-            <p class="rung-what en">Double-click and it renders and plays. What you write is kept in the
-              browser's own storage; tool calls fail politely and the card stays usable. Nothing to
-              implement — every browser already is this.</p>
-            <p class="rung-what zh">双击就能看、能玩。写下的东西存在浏览器本地；工具调用会礼貌地失败，卡片照常可用。无需实现任何东西——每个浏览器天生就是它。</p>
+            <p class="rung-what en">Open a card in a browser to view and interact with it.</p>
+            <p class="rung-what zh">在浏览器中打开卡片，即可查看和交互。</p>
           </div>
         </li>
         <li>
@@ -339,15 +333,8 @@
         </li>
       </ol>
 
-      <p class="verdict en">Two ladders that do not convert into each other: hosts are graded L1 to L3, and
-        cards are not graded at all. A card has exactly one verdict — the L0 harmlessness test. Passing is
-        qualifying, and there is no higher grade.</p>
-      <p class="verdict zh">两把梯子互不换算：宿主按能力分 L1 到 L3，卡片不分级。一张卡只有一项判定——L0 无害性测试。通过即合格，没有更高一级。</p>
-
-      <p class="grant en">A card can ask. Only you can grant. What a card may reach is frozen in its
-        declaration — permission is asked per named thing, remembered per card, and expires the moment the
-        declaration changes.</p>
-      <p class="grant zh">卡片可以请求，点头只能是你。它能碰什么，在声明里冻结——授权按名目逐件询问、按卡片记忆，声明一变，授权即失效。</p>
+      <p class="grant en">You control which tools and resources a card can access.</p>
+      <p class="grant zh">卡片能访问哪些工具和资源，由你决定。</p>
     </div>
   </section>
 
@@ -393,8 +380,8 @@
 &lt;/body&gt;
 &lt;/html&gt;</code></pre>
 
-      <p class="note en">Check it against the static rules of chapter 9 — exit code 0 is clean:</p>
-      <p class="note zh">拿第 9 章的静态规则检查它，退出码 0 即干净：</p>
+      <p class="note en">Validate the card:</p>
+      <p class="note zh">检查卡片：</p>
 <pre class="command"><code>node conformance/bin/check-card.mjs my-card.card.html</code></pre>
 
       <p class="note en">Not one line of JavaScript — three declarative markers do the wiring.</p>
@@ -405,14 +392,9 @@
   <!-- 6. compatibility -->
   <section>
     <div class="wrap">
-      <h2><span class="en">Compatibility is a command, not a promise.</span><span class="zh">兼容性是一条命令，不是一句承诺。</span></h2>
-      <p class="body en">This repository ships a
-        <a href="https://github.com/liliMozi/showcard/tree/main/reference">reference host</a> you can read
-        in one sitting, and a
-        <a href="https://github.com/liliMozi/showcard/tree/main/conformance">conformance suite</a> any
-        third party can run against their own implementation: <code>npm test</code>. The rules of chapter 9
-        are not prose — they are runnable.</p>
-      <p class="body zh">仓库里带着一个<a href="https://github.com/liliMozi/showcard/tree/main/reference">一口气能读完的参考宿主</a>，和<a href="https://github.com/liliMozi/showcard/tree/main/conformance">任何第三方都能对自己实现跑起来的一致性套件</a>：<code>npm test</code>。第 9 章的规则不是散文，是可以执行的。</p>
+      <h2><span class="en">Build and test your host.</span><span class="zh">接入并验证。</span></h2>
+      <p class="body en">Build on the <a href="https://github.com/liliMozi/showcard/tree/main/reference">reference host</a>, then <a href="https://github.com/liliMozi/showcard/blob/main/guides/testing.md">test your implementation</a> with the conformance suite.</p>
+      <p class="body zh">从<a href="https://github.com/liliMozi/showcard/tree/main/reference">参考宿主</a>起步，用一致性套件<a href="https://github.com/liliMozi/showcard/blob/main/guides/testing.zh.md">验证你的实现</a>。</p>
     </div>
   </section>
 
@@ -430,41 +412,23 @@
         </details>
         <details>
           <summary><span class="en">How does it relate to plugins and Skills?</span><span class="zh">它和插件、Skill 是什么关系？</span></summary>
-          <p class="en">Think of it as a Skill you can touch. In the working-agent era, interaction matters
-            and graphical interfaces matter — and the agent's tool infrastructure is reusable: what a card
-            binds is exactly what your agent can already do. A Skill teaches the agent to do things;
-            showcard gives the results a face you can operate.</p>
-          <p class="zh">可以把它理解成能交互的 Skill。我们相信在 Working Agent 时代，交互很重要，图形界面也很重要；而 Agent 已有的工具基础设施可以直接复用——卡片能绑定的，正是你的 Agent 本来就会用的工具。Skill 教 Agent 做事，showcard 让成果长出界面、可以上手。</p>
+          <p class="en">A Skill teaches an Agent what to do. Showcard gives the result an interactive interface connected to the Agent’s tools.</p>
+          <p class="zh">Skill 教 Agent 做事，Showcard 为成果提供交互界面，并连接 Agent 的工具。</p>
         </details>
         <details>
           <summary><span class="en">What can a card do without a host?</span><span class="zh">没有宿主它能干嘛？</span></summary>
-          <p class="en">Render and interact. Calls to host capabilities fail politely with a defined error
-            envelope, and the card stays usable — the spec calls this graceful degradation, and the suite tests
-            it.</p>
-          <p class="zh">渲染与交互。对宿主能力的调用会以规定的失败信封礼貌地失败，卡片保持可用——规范称之为优雅降级，套件会测它。</p>
+          <p class="en">View and interact with the card. Features that require host tools remain unavailable.</p>
+          <p class="zh">查看和操作卡片。依赖宿主工具的功能暂不可用。</p>
         </details>
         <details>
           <summary><span class="en">Can a card reach the network, or my files?</span><span class="zh">卡片能碰网络或我的文件吗？</span></summary>
-          <p class="en">Only what its manifest declares, and only after you allow it. Asks are per named host or
-            directory, remembered per card, and reset when the card's declaration changes. URL images and other passive media stay blocked until the host grants the relevant network access; package-local assets travel with the card.</p>
-          <p class="zh">只有声明过的，而且要你点头。询问按具体主机名或目录逐件进行，按卡片记忆，声明一变即重新来过。网址图片等被动媒体在宿主授予相应网络访问前会被拦截；包内图片则随卡片一起携带。</p>
-        </details>
-        <details>
-          <summary><span class="en">How do I check a card is legal?</span><span class="zh">怎么检查一张卡合规？</span></summary>
-          <p class="en">One command: <code>node conformance/bin/check-card.mjs my-card.card.html</code> — exit 0
-            is clean.</p>
-          <p class="zh">一条命令：<code>node conformance/bin/check-card.mjs my-card.card.html</code>，退出码 0 即干净。</p>
+          <p class="en">Access requires your permission. You can revoke it at any time.</p>
+          <p class="zh">访问需要你的授权，你可以随时撤销。</p>
         </details>
         <details>
           <summary><span class="en">Can I build a host?</span><span class="zh">我能实现一个宿主吗？</span></summary>
-          <p class="en">Yes — that is the point. Start from <code>reference/</code>, a minimal state host in
-            plain ES modules, and let <code>conformance/</code> grade you.</p>
-          <p class="zh">能，这正是目的。从 <code>reference/</code> 起步——纯 ES module 的最小状态宿主，让 <code>conformance/</code> 给你打分。</p>
-        </details>
-        <details>
-          <summary><span class="en">Who owns this?</span><span class="zh">这个规范归谁？</span></summary>
-          <p class="en">The specification is CC BY 4.0 and the reference/conformance code is MIT. Showcase recipes and artwork have their own licenses, listed below. The specification is maintained bilingually, with English canonical.</p>
-          <p class="zh">规范采用 CC BY 4.0，参考实现与一致性套件采用 MIT。展示配方和图片采用下方单独列出的许可。规范双语维护，以英文为准。</p>
+          <p class="en">Follow the <a href="https://github.com/liliMozi/showcard/blob/main/guides/host-integration.md">host integration guide</a> to add Showcard to your Agent.</p>
+          <p class="zh">按照<a href="https://github.com/liliMozi/showcard/blob/main/guides/host-integration.zh.md">宿主接入指南</a>，为你的 Agent 添加 Showcard 支持。</p>
         </details>
       </div>
     </div>
@@ -474,14 +438,8 @@
 
 <footer>
   <div class="wrap">
-    <p class="en">Specification text (<code>spec/</code>) is licensed under CC BY 4.0; the code
-      (<code>reference/</code>, <code>conformance/</code>) is licensed under the MIT license.</p>
-    <p class="zh">规范正文（<code>spec/</code>）采用 CC BY 4.0；代码（<code>reference/</code>、<code>conformance/</code>）采用 MIT 许可。</p>
-    <p class="en">Source: <a href="https://github.com/liliMozi/showcard">github.com/liliMozi/showcard</a></p>
-    <p class="zh">源码：<a href="https://github.com/liliMozi/showcard">github.com/liliMozi/showcard</a></p>
+    <p><a href="https://github.com/liliMozi/showcard">GitHub</a> · <a href="credits.html"><span class="en">Credits &amp; licenses</span><span class="zh">署名与许可</span></a></p>
   </div>
-<p class="wrap en">Showcase recipes: <a href="examples/LICENSE-RECIPES">Apache-2.0</a>. Reference runtime: <a href="examples/LICENSE-RUNTIME">MIT</a>. <a href="examples/note/ARTWORK.md">Great Wall artwork: CC BY-SA 3.0</a>.</p>
-<p class="wrap zh">展示配方：<a href="examples/LICENSE-RECIPES">Apache-2.0</a>。参考运行时：<a href="examples/LICENSE-RUNTIME">MIT</a>。<a href="examples/note/ARTWORK.md">长城图片：CC BY-SA 3.0</a>。</p>
 </footer>
 
 <script>

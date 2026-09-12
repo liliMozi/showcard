@@ -659,7 +659,7 @@ if(window.parent===window){
   });
 }
 document.addEventListener('DOMContentLoaded',function(){
-  var text=window.parent===window ? "このブラウザーに保存 · カードのパッケージを共有できます" : "ウェブデモ · 編集はページの再読み込みまで有効";
+  var text=window.parent===window ? "このブラウザーに保存済み。" : "再読み込みすると編集内容は消えます。";
   if(text){var p=document.createElement('p');p.textContent=text;p.style.cssText='font:11px/1.5 var(--font-ui);color:var(--text-muted);margin:0;padding:8px 20px 12px;flex:none';document.body.appendChild(p)}
 });
 </script></head>

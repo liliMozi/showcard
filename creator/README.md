@@ -7,9 +7,7 @@ A **recipe** is a skill that teaches an agent to mint one kind of card
 agent to make recipes.
 
 It is a package with no template of its own: one `SKILL.md` and three
-reference documents. That is a legal recipe — the profile marks the package,
-not its contents — and it is deliberately the smallest possible shape, because
-what this recipe produces is other packages, not cards.
+reference documents. The profile marks the package, not its contents.
 
 | File | What is in it |
 |------|---------------|
@@ -26,14 +24,5 @@ compatibility name; a host that has never heard of recipes will read this as an
 ordinary skill and the text still makes sense — it is then guidance for writing
 a card package by hand, single file or directory either way.
 
-The frontmatter says `default-enabled: false` on purpose. A recipe an agent
-installs on its own arrives switched off, and the person whose agent it is
-turns it on.
-
-## Why the interview and not a generator
-
-A recipe encodes a judgement that a generator cannot make: whether this card is
-worth packaging at all, and which of its buttons can honestly be wired to a
-tool. Both answers live with the person asking, and both are cheap to get by
-asking and expensive to get wrong. The five stages exist to get them out in an
-order where each answer makes the next question easier.
+The frontmatter says `default-enabled: false`. A recipe an agent installs on
+its own arrives switched off, and the person whose agent it is turns it on.

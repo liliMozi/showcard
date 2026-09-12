@@ -1,23 +1,16 @@
-# Website examples
+# Card examples
 
-The weather, two-octave piano and Great Wall note packages are adapted from
-OpenHanako recipes. The to-do package is used in the OpenHanako chat mock.
-Recipe code is Apache-2.0 (`LICENSE-RECIPES`); reference runtime is MIT
-(`LICENSE-RUNTIME`). Weather icons credit Bas Milius / Meteocons (MIT).
-The Great Wall illustration is CC BY-SA 3.0; see `note/ARTWORK.md` for the source,
-artist and changes. Other illustrations retain the recipe license.
+Weather, piano, note and to-do cards. Each directory contains an HTML source,
+local assets, and generated entries in English, Chinese, Japanese and Korean.
 
-Run `node docs/examples/build.mjs` in the specification checkout. Each package's
-`source.html` and local assets are the authoring inputs; `index.html` and its zh,
-ja and ko variants are generated. `runtime/` is copied from the tested reference
-implementation. The original three single-file fixtures remain reproducible via
-`build-legacy.mjs`; `weather-package/` remains a minimal package fixture.
+```sh
+node docs/examples/build.mjs
+```
 
-`demo-host.js` attaches only to marked, same-site iframes. Each has independent
-in-memory state. No tool gateway or conversation is available. The weather is a
-dated sample; editing a note or to-do lasts until page reload. When an exported
-entry is opened directly, the standard runtime uses local browser storage.
+Edit `source.html` and local assets, then rebuild. The build injects the reference
+runtime and initial sample data into each `index*.html` entry.
 
-To synchronize the separate Showcard website, run its `examples/build.mjs` with
-the specification checkout as the argument after rebuilding here. OpenHanako's
-`scripts/sync-cards.mjs` takes the same argument and copies only its chat examples.
+The website host stores state in memory; reloading resets edits. Exported entries
+opened directly use browser storage. The weather example displays sample data.
+
+For recipe and artwork attribution, see [Credits & licenses](../credits.html).

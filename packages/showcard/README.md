@@ -7,9 +7,10 @@ in a headless reference host.
 
 Specification: https://showcard.org
 
-> This checkout contains CLI **0.9.2**. The npm registry is published separately
-> and may still serve 0.9.1. To use this checkout: from the repository root, run
-> `npm ci`, then `npm run cli -- --help`. GitHub publication does not publish npm.
+This guide covers CLI **0.9.2**.
+
+> To use this checkout: from the repository root, run `npm ci`, then
+> `npm run cli -- --help`.
 
 ## Install
 
@@ -121,7 +122,7 @@ command itself could not run (a bad `--adapter` path, a module with no
 default export, or a default export that does not return a `mount` function).
 
 The adapter may also implement `async close()` to release shared servers or browser
-sessions; the CLI awaits it after the suite. See the runnable
+sessions; the CLI awaits it after the suite. See the
 [`examples/host/adapter.mjs`](../../examples/host/adapter.mjs).
 
 ## `showcard shim <card.html>`

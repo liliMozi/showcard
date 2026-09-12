@@ -2,7 +2,7 @@
 
 [中文](host-integration.zh.md) · [Project](../README.md) · [Testing your host](testing.md)
 
-Start with the runnable example, then replace its integration points with your
+Start with the example, then replace its integration points with your
 own application's services. The reference is an L1 implementation, not a complete
 Agent, plugin system, permission service, or production backend.
 
@@ -46,9 +46,9 @@ shared package creates a fresh one.
    subscriptions; retain or remove data according to the entity's lifetime.
 
 The example's only tool is the explicitly allowed, side-effect-free
-`demo.time.now`. Its browser callback demonstrates the tool boundary with an ISO
-timestamp. Real tools holding credentials or modifying files belong behind a
-trusted backend gateway; never copy those credentials into a card or browser callback.
+`demo.time.now`. Its browser callback demonstrates the tool boundary with an
+ISO timestamp. Tools holding credentials or modifying files belong behind a
+trusted backend gateway; credentials **MUST NOT** enter card or browser code.
 
 ## What the reference gives you, and what you must supply
 
@@ -65,8 +65,7 @@ trusted backend gateway; never copy those credentials into a card or browser cal
 
 The reference dispatcher acknowledges `emit` shapes for conformance; it does not
 deliver messages to an Agent conversation. A real host must connect delivery before
-advertising that behavior, or explicitly report it unavailable. Neither `emit` nor
-ordinary card clicks are a direct LLM API.
+advertising that behavior, or explicitly report it unavailable.
 
 ## Permission and lifecycle boundaries
 
