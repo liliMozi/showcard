@@ -1,0 +1,25 @@
+{
+  "name": "showcard-spec",
+  "private": true,
+  "description": "Open specification, reference host and conformance tools for HTML-first interactive card packages",
+  "license": "(MIT AND CC-BY-4.0)",
+  "homepage": "https://showcard.org",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "demo": "node examples/host/server.mjs",
+    "cli": "node scripts/showcard.mjs",
+    "check:examples": "node conformance/bin/check-card.mjs examples/host/card docs/examples/weather docs/examples/piano docs/examples/note docs/examples/todo"
+  },
+  "devDependencies": {
+    "jsdom": "29.0.2",
+    "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liliMozi/showcard.git"
+  }
+}

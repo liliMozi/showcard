@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-undeclared-binding">
+<title>Undeclared binding probe</title>
+<script type="application/json" data-card-manifest>
+{
+  "spec": "1.0",
+  "toolBindings": {
+    "echo": { "tool": "conformance.echo", "description": "echoes its input back" }
+  }
+}
+</script>
+</head>
+<body>
+<p data-probe-static>Nothing outside the declaration has a channel.</p>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+
+  // Section 1.4 / 7.4: a binding the manifest does not declare has no channel,
+  // and section 2.6 names the code for saying so.
+  function main() {
+    return window.card.invoke('never-declared', { anything: true }).then(function (envelope) {
+      say('undeclared-binding',
+        !!envelope && envelope.ok === false && envelope.code === 'CARD_HOST_TOOL_UNAVAILABLE',
+        'an undeclared binding answered ' + JSON.stringify(envelope && (envelope.code || envelope.ok)));
+      return window.card.invoke('echo', { declared: true });
+    }).then(function (envelope) {
+      say('declared-binding-reaches-the-tool', !!envelope && envelope.ok === true,
+        'the declared binding answered ' + JSON.stringify(envelope && (envelope.code || envelope.ok)));
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="ja" data-card-sizing="viewport">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' data:; style-src 'unsafe-inline' data:; img-src 'self' data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'">
+<script>/* showcard reference injection layer */
+(function () {
+  'use strict';
+
+  // Section 6.2 / 2.2: first definition wins. A host injects before the file's
+  // own shim, so the shim finds window.card already there and steps aside.
+  if (window.card) { return; }
+
+  var K = {
+  "CODES": {
+    "CAPABILITY_REQUIRED": "CARD_HOST_CAPABILITY_REQUIRED",
+    "CAPABILITY_NOT_SUPPORTED": "CARD_HOST_CAPABILITY_NOT_SUPPORTED",
+    "TOOL_UNAVAILABLE": "CARD_HOST_TOOL_UNAVAILABLE",
+    "TIMEOUT": "CARD_HOST_TIMEOUT",
+    "POST_FAILED": "CARD_HOST_POST_FAILED",
+    "INVALID_RESPONSE": "CARD_HOST_INVALID_RESPONSE",
+    "STATE_TOO_LARGE": "CARD_HOST_STATE_TOO_LARGE",
+    "STORAGE_UNAVAILABLE": "CARD_HOST_STORAGE_UNAVAILABLE",
+    "STORAGE_FAILED": "CARD_HOST_STORAGE_FAILED",
+    "CONTRACT_UNSUPPORTED": "CARD_HOST_CONTRACT_UNSUPPORTED",
+    "RATE_LIMITED": "CARD_HOST_RATE_LIMITED",
+    "TOOL_FAILED": "CARD_HOST_TOOL_FAILED",
+    "INVALID_INPUT": "CARD_HOST_INVALID_INPUT",
+    "NO_ROUTE": "CARD_HOST_EMIT_NO_ROUTE"
+  },
+  "CAP": {
+    "STATE_GET": "state.get",
+    "STATE_SET": "state.set",
+    "INVOKE": "invoke",
+    "CAPABILITIES": "capabilities",
+    "EMIT": "emit"
+  },
+  "REQUEST_TYPE": "card:request",
+  "RESPONSE_TYPE": "card:response",
+  "TIMEOUT_MS": 5000,
+  "STATE_BUDGET_BYTES": 65536,
+  "STATE_KEY_PREFIX": "card-state:"
+};
+  var CODES = K.CODES;
+  var CAP = K.CAP;
+  var doc = window.document;
+  var requestCounter = 0;
+
+  function isPlainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function describe(error) {
+    if (!error) { return 'unknown error'; }
+    if (typeof error === 'string') { return error; }
+    return String(error.message || error);
+  }
+
+  function ok(result) {
+    return { ok: true, result: isPlainObject(result) ? result : {} };
+  }
+
+  function fail(code, error) {
+    return { ok: false, code: code, error: error || code, result: {} };
+  }
+
+  // Section 2.4: an answer is only an envelope if it says whether it succeeded,
+  // and a failure has to name its code. Anything else is an invalid response.
+  function normalizeEnvelope(raw) {
+    if (!raw || typeof raw !== 'object') { return null; }
+    if (raw.ok === true) {
+      return { ok: true, result: isPlainObject(raw.result) ? raw.result : {} };
+    }
+    if (raw.ok === false) {
+      if (typeof raw.code !== 'string' || raw.code === '') { return null; }
+      return {
+        ok: false,
+        code: raw.code,
+        error: typeof raw.error === 'string' ? raw.error : raw.code,
+        result: isPlainObject(raw.result) ? raw.result : {}
+      };
+    }
+    return null;
+  }
+
+  function byteLength(text) {
+    var Encoder = window.TextEncoder || (typeof TextEncoder === 'function' ? TextEncoder : null);
+    if (Encoder) { return new Encoder().encode(text).length; }
+    var bytes = 0;
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      if (code < 0x80) { bytes += 1; }
+      else if (code < 0x800) { bytes += 2; }
+      else if (code >= 0xd800 && code <= 0xdbff) { bytes += 4; i++; }
+      else { bytes += 3; }
+    }
+    return bytes;
+  }
+
+  // Section 1.3: identity is never burned into the package; a document carries
+  // no id of its own to key a fallback store by. Section 2.5 derives the key
+  // from the document's own address instead — location.pathname or an
+  // equivalent stable identifier — which is exactly how a plain web page's
+  // storage is already partitioned: two different paths get two different
+  // buckets with no id field required to make that true.
+  function readLocationKey() {
+    try {
+      var path = window.location && window.location.pathname;
+      return path ? String(path) : '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function getStorage() {
+    try {
+      return window.localStorage || null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function storageKey() {
+    var path = readLocationKey();
+    return path ? K.STATE_KEY_PREFIX + path : '';
+  }
+
+  function readLocalState() {
+    var storage = getStorage();
+    if (!storage) {
+      return { error: fail(CODES.STORAGE_UNAVAILABLE, 'local storage is not available') };
+    }
+    var key = storageKey();
+    if (!key) {
+      return {
+        error: fail(
+          CODES.STORAGE_UNAVAILABLE,
+          'no location path is available to derive a fallback storage key from'
+        )
+      };
+    }
+    var raw;
+    try {
+      raw = storage.getItem(key);
+    } catch (error) {
+      return { error: fail(CODES.STORAGE_UNAVAILABLE, 'local storage read failed: ' + describe(error)) };
+    }
+    if (raw === null || raw === undefined || raw === '') { return { state: {} }; }
+    var parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      // An unreadable fallback payload reads as empty state; there is no code in
+      // section 2.6 for corrupt local storage, and refusing to open would break
+      // the section 9.2 harmlessness guarantee.
+      return { state: {} };
+    }
+    return { state: isPlainObject(parsed) ? parsed : {} };
+  }
+
+  function writeLocalState(nextState) {
+    var storage = getStorage();
+    if (!storage) {
+      return fail(CODES.STORAGE_UNAVAILABLE, 'local storage is not available');
+    }
+    var key = storageKey();
+    if (!key) {
+      return fail(
+        CODES.STORAGE_UNAVAILABLE,
+        'no location path is available to derive a fallback storage key from'
+      );
+    }
+    var serialized;
+    try {
+      serialized = JSON.stringify(nextState);
+    } catch (error) {
+      return fail(CODES.STORAGE_FAILED, 'the state could not be serialized: ' + describe(error));
+    }
+    // Section 2.5: refuse, never truncate.
+    if (byteLength(serialized) > K.STATE_BUDGET_BYTES) {
+      return fail(
+        CODES.STATE_TOO_LARGE,
+        'the serialized state exceeds the ' + K.STATE_BUDGET_BYTES + ' byte budget'
+      );
+    }
+    try {
+      storage.setItem(key, serialized);
+    } catch (error) {
+      return fail(CODES.STORAGE_FAILED, 'local storage write failed: ' + describe(error));
+    }
+    return ok({ state: nextState });
+  }
+
+  function standaloneStateGet(payload) {
+    var read = readLocalState();
+    if (read.error) { return read.error; }
+    var key = payload && typeof payload.key === 'string' ? payload.key : null;
+    if (key === null) { return ok({ state: read.state }); }
+    return ok({ key: key, value: read.state[key] });
+  }
+
+  function standaloneStateSet(payload) {
+    if (!payload || typeof payload !== 'object') {
+      return fail(CODES.INVALID_INPUT, 'state.set needs a key and a value, or a whole state object');
+    }
+    if (isPlainObject(payload.state)) {
+      return writeLocalState(payload.state);
+    }
+    if (typeof payload.key === 'string' && payload.key !== '') {
+      var read = readLocalState();
+      if (read.error) { return read.error; }
+      var next = {};
+      for (var name in read.state) {
+        if (Object.prototype.hasOwnProperty.call(read.state, name)) { next[name] = read.state[name]; }
+      }
+      next[payload.key] = payload.value;
+      return writeLocalState(next);
+    }
+    return fail(CODES.INVALID_INPUT, 'state.set needs a key and a value, or a whole state object');
+  }
+
+  // Section 3.1 / 3.4: tell the card the truth about where it is.
+  function standaloneCapabilities() {
+    return ok({
+      environment: 'standalone',
+      capabilities: { state: 'local_fallback', invoke: 'requires_host', emit: 'requires_host' }
+    });
+  }
+
+  function requestStandalone(capability, payload) {
+    if (capability === CAP.CAPABILITIES) { return standaloneCapabilities(); }
+    if (capability === CAP.STATE_GET) { return standaloneStateGet(payload); }
+    if (capability === CAP.STATE_SET) { return standaloneStateSet(payload); }
+    // Section 2.3 / 3.4: emit is a named convenience, not a tool. Standalone
+    // it is unsupported; the default below would otherwise call it a missing
+    // tool channel.
+    if (capability === CAP.EMIT) {
+      return fail(CODES.CAPABILITY_NOT_SUPPORTED, 'this card is open without a host, so emit is not available');
+    }
+    // Section 3.4: outside a host there is no tool channel at all.
+    return fail(CODES.TOOL_UNAVAILABLE, 'this card is open without a host, so there is no tool channel');
+  }
+
+  // Section 2.8: postMessage, card: prefix, paired by requestId.
+  function requestFromHost(capability, payload) {
+    return new Promise(function (resolve) {
+      requestCounter += 1;
+      var requestId = 'card-' + requestCounter + '-' + Math.random().toString(36).slice(2, 10);
+      var settled = false;
+      var timer = null;
+
+      function settle(envelope) {
+        if (settled) { return; }
+        settled = true;
+        if (timer !== null) { window.clearTimeout(timer); timer = null; }
+        window.removeEventListener('message', onMessage);
+        resolve(envelope);
+      }
+
+      function onMessage(event) {
+        var data = event ? event.data : null;
+        if (!data || typeof data !== 'object') { return; }
+        if (data.type !== K.RESPONSE_TYPE) { return; }
+        if (data.requestId !== requestId) { return; }
+        var envelope = normalizeEnvelope(data);
+        settle(envelope || fail(CODES.INVALID_RESPONSE, 'the host answer is not a valid envelope'));
+      }
+
+      window.addEventListener('message', onMessage);
+
+      try {
+        window.parent.postMessage({
+          type: K.REQUEST_TYPE,
+          requestId: requestId,
+          capability: capability,
+          payload: payload === undefined ? null : payload
+        }, '*');
+      } catch (error) {
+        settle(fail(CODES.POST_FAILED, 'the request could not be delivered: ' + describe(error)));
+        return;
+      }
+
+      timer = window.setTimeout(function () {
+        settle(fail(CODES.TIMEOUT, 'the host did not answer within ' + K.TIMEOUT_MS + ' ms'));
+      }, K.TIMEOUT_MS);
+    });
+  }
+
+  // Section 2.3: one dispatch point, five named conveniences on top of it.
+  function request(capability, payload) {
+    if (typeof capability !== 'string' || capability === '') {
+      return Promise.resolve(fail(CODES.CAPABILITY_REQUIRED, 'a capability name is required'));
+    }
+    if (window.parent !== window) {
+      return requestFromHost(capability, payload);
+    }
+    return Promise.resolve(requestStandalone(capability, payload));
+  }
+
+  // Section 2.3: userGesture is collected here. Authors cannot fill it;
+  // a host that routes emit must ignore a value the author wrote.
+  function readUserGesture() {
+    try {
+      if (window.navigator && window.navigator.userActivation && typeof window.navigator.userActivation.isActive === 'boolean') {
+        return window.navigator.userActivation.isActive === true;
+      }
+    } catch (err) {}
+    try {
+      return !!(window.event && window.event.isTrusted);
+    } catch (err) {}
+    return false;
+  }
+
+  var card = {
+    state: {
+      get: function (key) {
+        if (key === undefined || key === null) { return request(CAP.STATE_GET, { key: null }); }
+        if (typeof key !== 'string' || key === '') {
+          return Promise.resolve(fail(CODES.INVALID_INPUT, 'state.get takes a string key, or nothing at all'));
+        }
+        return request(CAP.STATE_GET, { key: key });
+      },
+      set: function (keyOrState, value) {
+        if (typeof keyOrState === 'string' && keyOrState !== '') {
+          return request(CAP.STATE_SET, { key: keyOrState, value: value });
+        }
+        if (isPlainObject(keyOrState)) {
+          return request(CAP.STATE_SET, { state: keyOrState });
+        }
+        return Promise.resolve(
+          fail(CODES.INVALID_INPUT, 'state.set takes (key, value) or a whole state object')
+        );
+      }
+    },
+    invoke: function (bindingId, input) {
+      if (typeof bindingId !== 'string' || bindingId === '') {
+        return Promise.resolve(fail(CODES.INVALID_INPUT, 'invoke takes a binding id declared in the manifest'));
+      }
+      return request(CAP.INVOKE, { bindingId: bindingId, input: input === undefined ? null : input });
+    },
+    emit: function (name, payload, to) {
+      if (typeof name !== 'string' || name === '') {
+        return Promise.resolve(fail(CODES.INVALID_INPUT, 'emit takes an event name'));
+      }
+      var wire = {
+        name: name,
+        payload: payload === undefined ? null : payload,
+        userGesture: readUserGesture()
+      };
+      if (typeof to === 'string' && to !== '') wire.to = to;
+      return request(CAP.EMIT, wire);
+    },
+    request: request,
+    capabilities: function () {
+      return request(CAP.CAPABILITIES, null);
+    }
+  };
+
+  window.card = card;
+
+  /* ---- Section 2.7: the three declarative markers ------------------------
+     Every marker below goes through the public window.card surface, so any
+     sugar behaviour has a hand-written equivalent (section 9.4).           */
+
+  var NATIVELY_ACTIVATED = { BUTTON: true, A: true, INPUT: true, SELECT: true, TEXTAREA: true };
+  var FORM_CONTROLS = { INPUT: true, TEXTAREA: true, SELECT: true };
+
+  function attributeSelector(name, value) {
+    return '[' + name + '="' + String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
+  }
+
+  function textify(value) {
+    if (value === null || value === undefined) { return ''; }
+    if (typeof value === 'string') { return value; }
+    if (typeof value === 'number' || typeof value === 'boolean') { return String(value); }
+    if (isPlainObject(value) && Object.keys(value).length === 0) { return ''; }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function closestMatch(node, selector) {
+    var element = node && node.nodeType === 3 ? node.parentNode : node;
+    if (!element || typeof element.closest !== 'function') { return null; }
+    return element.closest(selector);
+  }
+
+  function serializeForm(form) {
+    var data = {};
+    var FormDataCtor = window.FormData || (typeof FormData === 'function' ? FormData : null);
+    if (!form || !FormDataCtor) { return data; }
+    var entries = new FormDataCtor(form).entries();
+    var step = entries.next();
+    while (!step.done) {
+      var name = step.value[0];
+      var value = step.value[1];
+      if (Object.prototype.hasOwnProperty.call(data, name)) {
+        if (Array.isArray(data[name])) { data[name].push(value); }
+        else { data[name] = [data[name], value]; }
+      } else {
+        data[name] = value;
+      }
+      step = entries.next();
+    }
+    return data;
+  }
+
+  // Section 2.7: a container shows the latest result of its binding, as text.
+  // textContent only: the injection layer never writes markup into the card.
+  function renderResult(bindingId, envelope) {
+    if (!doc || typeof doc.querySelectorAll !== 'function') { return; }
+    var targets = doc.querySelectorAll(attributeSelector('data-result', bindingId));
+    var text = textify(envelope && envelope.result);
+    for (var i = 0; i < targets.length; i++) {
+      targets[i].textContent = text;
+    }
+  }
+
+  function activateInvoker(element) {
+    var bindingId = element.getAttribute('data-invoke');
+    if (!bindingId) { return; }
+    var form = typeof element.closest === 'function' ? element.closest('form') : null;
+    var input = form ? serializeForm(form) : undefined;
+    window.card.invoke(bindingId, input).then(function (envelope) {
+      renderResult(bindingId, envelope);
+    });
+  }
+
+  function readControl(element) {
+    if (element.type === 'checkbox') { return !!element.checked; }
+    if (element.type === 'radio') { return element.checked ? element.value : undefined; }
+    return element.value;
+  }
+
+  function writeControl(element, value) {
+    if (element.type === 'checkbox') { element.checked = !!value; return; }
+    if (element.type === 'radio') { element.checked = element.value === value; return; }
+    element.value = value === null || value === undefined ? '' : String(value);
+  }
+
+  function hydratePersistedControls() {
+    if (!doc || typeof doc.querySelectorAll !== 'function') { return; }
+    var controls = doc.querySelectorAll('[data-persist]');
+    if (!controls.length) { return; }
+    window.card.state.get().then(function (envelope) {
+      if (!envelope.ok) { return; }
+      var state = isPlainObject(envelope.result.state) ? envelope.result.state : {};
+      for (var i = 0; i < controls.length; i++) {
+        var control = controls[i];
+        if (!FORM_CONTROLS[control.tagName]) { continue; }
+        var key = control.getAttribute('data-persist');
+        if (key && Object.prototype.hasOwnProperty.call(state, key)) {
+          writeControl(control, state[key]);
+        }
+      }
+    });
+  }
+
+  if (doc && typeof doc.addEventListener === 'function') {
+    doc.addEventListener('click', function (event) {
+      var element = closestMatch(event.target, '[data-invoke]');
+      if (!element) { return; }
+      // Section 7.1: a card never submits a form outbound; the binding is the
+      // only channel, so the native submission is cancelled here.
+      if (typeof element.closest === 'function' && element.closest('form')) {
+        event.preventDefault();
+      }
+      activateInvoker(element);
+    }, true);
+
+    doc.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter') { return; }
+      var element = closestMatch(event.target, '[data-invoke]');
+      if (!element) { return; }
+      // Buttons and links already turn Enter into a click; handling it again
+      // here would fire the binding twice.
+      if (NATIVELY_ACTIVATED[element.tagName]) { return; }
+      event.preventDefault();
+      activateInvoker(element);
+    }, true);
+
+    doc.addEventListener('change', function (event) {
+      var element = event.target;
+      if (!element || typeof element.getAttribute !== 'function') { return; }
+      if (!FORM_CONTROLS[element.tagName]) { return; }
+      var key = element.getAttribute('data-persist');
+      if (!key) { return; }
+      var value = readControl(element);
+      if (value === undefined) { return; }
+      window.card.state.set(key, value);
+    }, true);
+
+    if (doc.readyState === 'loading') {
+      doc.addEventListener('DOMContentLoaded', hydratePersistedControls, { once: true });
+    } else {
+      hydratePersistedControls();
+    }
+  }
+})();
+</script>
+<script>(function () {
+  if (window.__cardPlaceholderInstalled) { return; }
+  window.__cardPlaceholderInstalled = true;
+
+  var MARKER = "data-card-placeholder";
+  var REASON = "This resource is no longer where it was";
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  /* Above this width the slot has room for a sentence; at or below it the
+     placeholder is standing in for an avatar or an icon and says less. */
+  var COMPACT_MAX_PX = 120;
+
+  var CSS = [
+    '.card-placeholder{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;',
+    'justify-content:center;gap:.35em;max-width:100%;min-width:2.5em;min-height:2.5em;padding:.75em;',
+    'border:1px solid var(--rule,rgba(128,128,128,.35));border-radius:8px;',
+    'background:var(--well,rgba(128,128,128,.08));color:var(--ink,inherit);text-align:center;overflow:hidden}',
+    '.card-placeholder--compact{gap:.2em;padding:.35em;border-radius:6px}',
+    '.card-placeholder__icon{width:28px;height:28px;flex:none;opacity:.55}',
+    '.card-placeholder--compact .card-placeholder__icon{width:18px;height:18px}',
+    '.card-placeholder__alt{font-size:.86rem;line-height:1.3}',
+    '.card-placeholder__reason{font-size:.72rem;line-height:1.3;opacity:.65;color:var(--muted,inherit)}'
+  ].join('');
+
+  function installStyle() {
+    if (document.getElementById('card-placeholder-style')) { return; }
+    var style = document.createElement('style');
+    style.id = 'card-placeholder-style';
+    style.textContent = CSS;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function svg(name, attributes) {
+    var node = document.createElementNS(SVG_NS, name);
+    for (var key in attributes) {
+      if (Object.prototype.hasOwnProperty.call(attributes, key)) {
+        node.setAttribute(key, attributes[key]);
+      }
+    }
+    return node;
+  }
+
+  /* A picture frame with a hill and a sun in it: the drawing every reader
+     already knows means "there was an image here". */
+  function icon() {
+    var root = svg('svg', {
+      'class': 'card-placeholder__icon',
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': '1.5',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      'aria-hidden': 'true'
+    });
+    root.appendChild(svg('rect', { x: '3', y: '5', width: '18', height: '14', rx: '2' }));
+    root.appendChild(svg('path', { d: 'M5 17.2l4.3-4.7 3.1 3.2L16 12l3 3.4' }));
+    root.appendChild(svg('circle', { cx: '9', cy: '9.4', r: '1.4' }));
+    return root;
+  }
+
+  function measure(node) {
+    var declaredWidth = parseFloat(node.getAttribute('width'));
+    var declaredHeight = parseFloat(node.getAttribute('height'));
+    var rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null;
+    return {
+      width: isFinite(declaredWidth) && declaredWidth > 0 ? declaredWidth : (rect && rect.width > 1 ? rect.width : 0),
+      height: isFinite(declaredHeight) && declaredHeight > 0 ? declaredHeight : (rect && rect.height > 1 ? rect.height : 0)
+    };
+  }
+
+  function build(node) {
+    var size = measure(node);
+    var alt = node.getAttribute ? (node.getAttribute('alt') || '') : '';
+    var compact = size.width > 0 && size.width <= COMPACT_MAX_PX;
+
+    var box = document.createElement('div');
+    box.setAttribute(MARKER, '');
+    box.setAttribute('role', 'img');
+    box.className = compact ? 'card-placeholder card-placeholder--compact' : 'card-placeholder';
+    box.setAttribute('aria-label', alt ? alt + '. ' + REASON : REASON);
+    if (size.width > 0) { box.style.width = size.width + 'px'; }
+    if (size.width > 0 && size.height > 0) {
+      box.style.aspectRatio = size.width + ' / ' + size.height;
+    } else if (size.height > 0) {
+      box.style.height = size.height + 'px';
+    }
+
+    box.appendChild(icon());
+    if (alt) {
+      var altLine = document.createElement('span');
+      altLine.className = 'card-placeholder__alt';
+      altLine.textContent = alt;
+      box.appendChild(altLine);
+    }
+    /* The reason line is dropped in a compact slot only when the alt text is
+       already carrying the message; with no alt there would be nothing left. */
+    if (!compact || !alt) {
+      var reasonLine = document.createElement('span');
+      reasonLine.className = 'card-placeholder__reason';
+      reasonLine.textContent = REASON;
+      box.appendChild(reasonLine);
+    }
+    return box;
+  }
+
+  function replace(node) {
+    if (!node || node.__cardPlaceholderDone || !node.parentNode) { return; }
+    node.__cardPlaceholderDone = true;
+    installStyle();
+    node.parentNode.replaceChild(build(node), node);
+  }
+
+  /* A <source> that fails inside a <picture> is not a failure the reader sees:
+     the browser moves on to the next candidate and the <img> reports for the
+     whole element if nothing works. Inside a media element there is no such
+     spokesman, so the parent is examined once the browser has settled — and
+     only replaced if it ended up with no usable source at all. */
+  function considerSourceParent(parent) {
+    if (!parent || !parent.tagName) { return; }
+    var tag = parent.tagName.toUpperCase();
+    if (tag !== 'VIDEO' && tag !== 'AUDIO') { return; }
+    window.setTimeout(function () {
+      if (parent.networkState === parent.NETWORK_NO_SOURCE) { replace(parent); }
+    }, 0);
+  }
+
+  /* Resource errors do not bubble; the capture phase is the only place a single
+     listener can see all of them. */
+  window.addEventListener('error', function (event) {
+    var node = event.target;
+    if (!node || node === window || !node.tagName) { return; }
+    var tag = node.tagName.toUpperCase();
+    if (tag === 'IMG' || tag === 'VIDEO' || tag === 'AUDIO') {
+      replace(node);
+      return;
+    }
+    if (tag === 'SOURCE') { considerSourceParent(node.parentNode); }
+  }, true);
+})();</script>
+
+<!-- Recipe adapted from OpenHanako. Licensed under Apache-2.0; see ../LICENSE-RECIPES. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two-octave piano</title>
+<style data-showcase-theme>
+:root{color-scheme:light;--bg:#F8F4ED;--bg-card:#FCFAF5;--text:#3B3D3F;--text-light:#68655F;--text-muted:#8A847A;--border:#E3DED2;--accent:#537D96;--accent-hover:#42657B;--accent-light:rgba(83,125,150,.1);--overlay-subtle:rgba(59,61,63,.04);--font-serif:Georgia,'Songti SC','Noto Serif CJK SC',serif;--font-ui:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans','Malgun Gothic',sans-serif;--font-mono:ui-monospace,SFMono-Regular,monospace;--radius-card:12px;--control-radius:8px;--corner-radius-scale:1}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg-card);color:var(--text);font-family:var(--font-serif);font-size:15px;line-height:1.6}button,input,textarea{font:inherit}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent)!important;outline-offset:2px}[hidden]{display:none!important}
+html[data-card-sizing="viewport"] body{overflow:auto}
+html[data-card-sizing="viewport"] .weather-hero{max-height:calc(100% - 180px);min-height:180px}
+</style>
+<script type="application/json" data-card-state>{"uiLanguage":"ja"}</script>
+<script>
+if(window.parent===window){
+  window.card.state.get().then(function(envelope){
+    if(envelope.ok && Object.keys(envelope.result.state || {}).length === 0){
+      return window.card.state.set(JSON.parse(document.querySelector('[data-card-state]').textContent));
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded',function(){
+  var text=window.parent===window ? "" : "";
+  if(text){var p=document.createElement('p');p.textContent=text;p.style.cssText='font:11px/1.5 var(--font-ui);color:var(--text-muted);margin:0;padding:8px 20px 12px;flex:none';document.body.appendChild(p)}
+});
+</script></head>
+<body>
+<h2 id="piano-card-label" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap">Piano card</h2>
+<style>
+.piano-paper{text-align:center;padding-top:20px;margin:0 0 12px}
+.piano-range{font-family:var(--font-serif);font-size:0.75rem;letter-spacing:0.14em;color:var(--text-muted);margin:0}
+.piano-keyboard{position:relative;display:flex;height:136px;border:1px solid var(--border);border-top:5px solid var(--text);border-radius:calc(3px * var(--corner-radius-scale, 1));corner-shape:squircle;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+.piano-key{border:none;padding:0;font:inherit;color:inherit;cursor:pointer}
+.piano-white{flex:1;background:var(--bg-card)}
+.piano-white + .piano-white{border-left:1px solid var(--border)}
+.piano-white[data-down="true"]{background:var(--bg)}
+.piano-black{position:absolute;top:0;height:60%;width:calc(100% / 15 * 0.62);transform:translateX(-50%);background:var(--text);border-radius:0 0 calc(2px * var(--corner-radius-scale, 1)) calc(2px * var(--corner-radius-scale, 1));corner-shape:squircle}
+.piano-black[data-down="true"]{box-shadow:inset 0 -2px 0 var(--accent)}
+input:focus,textarea:focus,button:focus{outline:none}
+html[data-card-sizing="viewport"],html[data-card-sizing="viewport"] body{height:100%}
+html[data-card-sizing="viewport"] body{display:flex;flex-direction:column}
+html[data-card-sizing="viewport"] .card-column{flex:1;display:flex;flex-direction:column;min-height:0}
+.card-column{max-width:512px;margin:0 auto;padding:12px 16px}
+html[data-card-sizing="viewport"] .card-column{width:100%;margin:0 auto}
+html[data-card-sizing="viewport"] .card-column{justify-content:center}
+html[data-card-sizing="viewport"] .piano-keyboard{flex:none}
+</style>
+<div class="card-column">
+<div class="piano-paper">
+<p class="piano-range">C4 – C6</p>
+</div>
+<div id="piano-keyboard" class="piano-keyboard" role="group" aria-label="Two-octave keyboard, C4 to C6">
+<button class="piano-key piano-white" type="button" data-midi="60" aria-label="C4"></button>
+<button class="piano-key piano-white" type="button" data-midi="62" aria-label="D4"></button>
+<button class="piano-key piano-white" type="button" data-midi="64" aria-label="E4"></button>
+<button class="piano-key piano-white" type="button" data-midi="65" aria-label="F4"></button>
+<button class="piano-key piano-white" type="button" data-midi="67" aria-label="G4"></button>
+<button class="piano-key piano-white" type="button" data-midi="69" aria-label="A4"></button>
+<button class="piano-key piano-white" type="button" data-midi="71" aria-label="B4"></button>
+<button class="piano-key piano-white" type="button" data-midi="72" aria-label="C5"></button>
+<button class="piano-key piano-white" type="button" data-midi="74" aria-label="D5"></button>
+<button class="piano-key piano-white" type="button" data-midi="76" aria-label="E5"></button>
+<button class="piano-key piano-white" type="button" data-midi="77" aria-label="F5"></button>
+<button class="piano-key piano-white" type="button" data-midi="79" aria-label="G5"></button>
+<button class="piano-key piano-white" type="button" data-midi="81" aria-label="A5"></button>
+<button class="piano-key piano-white" type="button" data-midi="83" aria-label="B5"></button>
+<button class="piano-key piano-white" type="button" data-midi="84" aria-label="C6"></button>
+<button class="piano-key piano-black" type="button" data-midi="61" aria-label="C#4" style="left:6.6667%"></button>
+<button class="piano-key piano-black" type="button" data-midi="63" aria-label="D#4" style="left:13.3333%"></button>
+<button class="piano-key piano-black" type="button" data-midi="66" aria-label="F#4" style="left:26.6667%"></button>
+<button class="piano-key piano-black" type="button" data-midi="68" aria-label="G#4" style="left:33.3333%"></button>
+<button class="piano-key piano-black" type="button" data-midi="70" aria-label="A#4" style="left:40.0000%"></button>
+<button class="piano-key piano-black" type="button" data-midi="73" aria-label="C#5" style="left:53.3333%"></button>
+<button class="piano-key piano-black" type="button" data-midi="75" aria-label="D#5" style="left:60.0000%"></button>
+<button class="piano-key piano-black" type="button" data-midi="78" aria-label="F#5" style="left:73.3333%"></button>
+<button class="piano-key piano-black" type="button" data-midi="80" aria-label="G#5" style="left:80.0000%"></button>
+<button class="piano-key piano-black" type="button" data-midi="82" aria-label="A#5" style="left:86.6667%"></button>
+</div>
+</div>
+<script>
+(function () {
+  var ui = (function () {
+  var TEXT = {"zh":{"invalid":"此卡片的界面语言不受支持。请使用 zh、zh-TW、en、ja 或 ko。","note.card":"笔记卡片","note.title":"笔记标题","note.body":"笔记内容","note.titlePlaceholder":"标题","note.bodyPlaceholder":"输入内容…","note.stamp":"盖时间戳","note.failed":"盖章没有成功","note.pin":"钉住卡片后可盖时间戳","note.stamped":"记于 {time}","todo.card":"待办卡片","todo.title":"清单标题","todo.field":"新事项","todo.placeholder":"添加事项","todo.add":"添加","todo.empty":"清单还没有事项。","todo.pin":"钉住此卡片后可编辑","todo.remove":"移除 {text}","pomodoro.card":"番茄钟卡片","pomodoro.focus":"专注","pomodoro.break":"休息","pomodoro.start":"开始","pomodoro.pause":"暂停","pomodoro.reset":"重置","pomodoro.tally":"今天完成 {count} 个番茄","pomodoro.bellOn":"铃声开","pomodoro.bellOff":"铃声关","pomodoro.notificationTitle":"番茄钟","pomodoro.focusDone":"专注结束，休息一下","pomodoro.breakDone":"休息结束，开始专注","weather.card":"天气卡片","weather.clear":"晴","weather.cloudy":"多云","weather.overcast":"阴","weather.fog":"雾","weather.rain":"雨","weather.snow":"雪","weather.thunder":"雷","weather.wind":"风 ","weather.humidity":"湿度 ","weather.working":"正在取天气…","weather.failed":"取不到天气，稍后再试","weather.notFound":"没有找到这个地方","weather.unplaced":"告诉 Hana 这张卡要看哪里的天气","weather.host":"钉住卡片后可以取天气","weather.refresh":"刷新","weather.updated":"更新于 ","piano.card":"钢琴卡片","piano.keyboard":"两组八度键盘，C4 至 C6","data.heading":"数据面板","data.waiting":"正在等待宿主数据。","data.host":"此卡片需要宿主来显示实时数据。"},"zh-TW":{"invalid":"此卡片的介面語言不受支援。請使用 zh、zh-TW、en、ja 或 ko。","note.card":"筆記卡片","note.title":"筆記標題","note.body":"筆記內容","note.titlePlaceholder":"標題","note.bodyPlaceholder":"輸入內容…","note.stamp":"蓋時間戳","note.failed":"蓋章沒有成功","note.pin":"釘選卡片後可蓋時間戳","note.stamped":"記於 {time}","todo.card":"待辦卡片","todo.title":"清單標題","todo.field":"新增事項","todo.placeholder":"新增事項","todo.add":"新增","todo.empty":"清單還沒有事項。","todo.pin":"釘選此卡片後可編輯","todo.remove":"移除 {text}","pomodoro.card":"番茄鐘卡片","pomodoro.focus":"專注","pomodoro.break":"休息","pomodoro.start":"開始","pomodoro.pause":"暫停","pomodoro.reset":"重設","pomodoro.tally":"今天完成 {count} 個番茄","pomodoro.bellOn":"鈴聲開","pomodoro.bellOff":"鈴聲關","pomodoro.notificationTitle":"番茄鐘","pomodoro.focusDone":"專注結束，休息一下","pomodoro.breakDone":"休息結束，開始專注","weather.card":"天氣卡片","weather.clear":"晴","weather.cloudy":"多雲","weather.overcast":"陰","weather.fog":"霧","weather.rain":"雨","weather.snow":"雪","weather.thunder":"雷雨","weather.wind":"風 ","weather.humidity":"濕度 ","weather.working":"正在更新天氣…","weather.failed":"暫時無法更新天氣。","weather.notFound":"找不到這個地點。","weather.unplaced":"先告訴我想看的地點。","weather.host":"此卡片需要宿主來取得天氣。","weather.refresh":"重新整理天氣","weather.updated":"更新於 ","piano.card":"鋼琴卡片","piano.keyboard":"兩組八度鍵盤，C4 至 C6","data.heading":"資料面板","data.waiting":"正在等待宿主資料。","data.host":"此卡片需要宿主來顯示即時資料。"},"en":{"invalid":"This card has an unsupported UI language. Use zh, zh-TW, en, ja, or ko.","note.card":"Note card","note.title":"Note title","note.body":"Note body","note.titlePlaceholder":"Title","note.bodyPlaceholder":"Write something…","note.stamp":"Add timestamp","note.failed":"Could not add the timestamp","note.pin":"Pin this card to add a timestamp","note.stamped":"Recorded {time}","todo.card":"To-do card","todo.title":"List title","todo.field":"New item","todo.placeholder":"Add an item","todo.add":"Add","todo.empty":"Nothing on the list yet.","todo.pin":"Pin this card to edit","todo.remove":"Remove {text}","pomodoro.card":"Pomodoro card","pomodoro.focus":"Focus","pomodoro.break":"Break","pomodoro.start":"Start","pomodoro.pause":"Pause","pomodoro.reset":"Reset","pomodoro.tally":"{count} pomodoros completed today","pomodoro.bellOn":"Bell on","pomodoro.bellOff":"Bell off","pomodoro.notificationTitle":"Pomodoro","pomodoro.focusDone":"Focus finished. Take a break.","pomodoro.breakDone":"Break finished. Start focusing.","weather.card":"Weather card","weather.clear":"Clear","weather.cloudy":"Cloudy","weather.overcast":"Overcast","weather.fog":"Fog","weather.rain":"Rain","weather.snow":"Snow","weather.thunder":"Thunderstorm","weather.wind":"Wind ","weather.humidity":"Humidity ","weather.working":"Updating weather…","weather.failed":"Weather could not be updated.","weather.notFound":"That place could not be found.","weather.unplaced":"Tell me which place to show first.","weather.host":"This card needs a host to fetch weather.","weather.refresh":"Refresh weather","weather.updated":"Updated ","piano.card":"Piano card","piano.keyboard":"Two-octave keyboard, C4 to C6","data.heading":"Data board","data.waiting":"Waiting for host data.","data.host":"This card needs a host to show live data."},"ja":{"invalid":"このカードの UI 言語は対応していません。zh、zh-TW、en、ja、ko を使用してください。","note.card":"ノートカード","note.title":"ノートのタイトル","note.body":"ノートの内容","note.titlePlaceholder":"タイトル","note.bodyPlaceholder":"入力…","note.stamp":"日時を追加","note.failed":"日時を追加できませんでした","note.pin":"日時を追加するにはカードをピン留めしてください","note.stamped":"記録 {time}","todo.card":"To-do カード","todo.title":"リストのタイトル","todo.field":"新しい項目","todo.placeholder":"項目を追加","todo.add":"追加","todo.empty":"リストに項目はありません。","todo.pin":"編集するにはこのカードをピン留めしてください","todo.remove":"{text} を削除","pomodoro.card":"ポモドーロカード","pomodoro.focus":"集中","pomodoro.break":"休憩","pomodoro.start":"開始","pomodoro.pause":"一時停止","pomodoro.reset":"リセット","pomodoro.tally":"今日の完了ポモドーロ: {count}","pomodoro.bellOn":"ベル オン","pomodoro.bellOff":"ベル オフ","pomodoro.notificationTitle":"ポモドーロ","pomodoro.focusDone":"集中が終わりました。休憩しましょう。","pomodoro.breakDone":"休憩が終わりました。集中を始めましょう。","weather.card":"天気カード","weather.clear":"晴れ","weather.cloudy":"くもり","weather.overcast":"曇天","weather.fog":"霧","weather.rain":"雨","weather.snow":"雪","weather.thunder":"雷雨","weather.wind":"風 ","weather.humidity":"湿度 ","weather.working":"天気を更新中…","weather.failed":"天気を更新できませんでした。","weather.notFound":"その場所は見つかりませんでした。","weather.unplaced":"表示する場所を指定してください。","weather.host":"このカードは天気を取得するホストが必要です。","weather.refresh":"天気を更新","weather.updated":"更新 ","piano.card":"ピアノカード","piano.keyboard":"2 オクターブの鍵盤、C4 から C6","data.heading":"データボード","data.waiting":"ホストのデータを待っています。","data.host":"このカードにはライブデータを表示するホストが必要です。"},"ko":{"invalid":"이 카드의 UI 언어는 지원되지 않습니다. zh, zh-TW, en, ja, ko를 사용하세요.","note.card":"메모 카드","note.title":"메모 제목","note.body":"메모 내용","note.titlePlaceholder":"제목","note.bodyPlaceholder":"내용 입력…","note.stamp":"시간 추가","note.failed":"시간을 추가하지 못했습니다","note.pin":"시간을 추가하려면 카드를 고정하세요","note.stamped":"기록됨 {time}","todo.card":"할 일 카드","todo.title":"목록 제목","todo.field":"새 항목","todo.placeholder":"항목 추가","todo.add":"추가","todo.empty":"목록에 항목이 없습니다.","todo.pin":"편집하려면 이 카드를 고정하세요","todo.remove":"{text} 삭제","pomodoro.card":"포모도로 카드","pomodoro.focus":"집중","pomodoro.break":"휴식","pomodoro.start":"시작","pomodoro.pause":"일시 정지","pomodoro.reset":"재설정","pomodoro.tally":"오늘 완료한 포모도로 {count}개","pomodoro.bellOn":"벨 켜짐","pomodoro.bellOff":"벨 꺼짐","pomodoro.notificationTitle":"포모도로","pomodoro.focusDone":"집중 시간이 끝났습니다. 휴식하세요.","pomodoro.breakDone":"휴식 시간이 끝났습니다. 집중을 시작하세요.","weather.card":"날씨 카드","weather.clear":"맑음","weather.cloudy":"구름 많음","weather.overcast":"흐림","weather.fog":"안개","weather.rain":"비","weather.snow":"눈","weather.thunder":"뇌우","weather.wind":"바람 ","weather.humidity":"습도 ","weather.working":"날씨 업데이트 중…","weather.failed":"날씨를 업데이트할 수 없습니다.","weather.notFound":"그 장소를 찾을 수 없습니다.","weather.unplaced":"표시할 장소를 먼저 알려주세요.","weather.host":"이 카드에는 날씨를 가져올 호스트가 필요합니다.","weather.refresh":"날씨 새로고침","weather.updated":"업데이트 ","piano.card":"피아노 카드","piano.keyboard":"C4부터 C6까지 두 옥타브 키보드","data.heading":"데이터 보드","data.waiting":"호스트 데이터를 기다리는 중입니다.","data.host":"이 카드에는 실시간 데이터를 표시할 호스트가 필요합니다."}};
+  var LEGACY = "en";
+  var snapshot = null;
+  var node = document.querySelector('script[type="application/json"][data-card-state]');
+  if (node) { try { snapshot = JSON.parse(node.textContent || ''); } catch (_) {} }
+  var supplied = !!(snapshot && typeof snapshot === 'object' && Object.prototype.hasOwnProperty.call(snapshot, 'uiLanguage'));
+  var raw = supplied ? snapshot.uiLanguage : LEGACY;
+function canonicalize(value) {
+    if (typeof value !== 'string') return null;
+    var normalized = value.trim().replace(/_/g, '-').toLowerCase();
+    if (normalized === 'zh' || /^zh-(hans|cn|sg)(-|$)/.test(normalized)) return 'zh';
+    if (normalized === 'zh-tw' || /^zh-(hant|hk)(-|$)/.test(normalized)) return 'zh-TW';
+    if (normalized === 'en' || normalized.indexOf('en-') === 0) return 'en';
+    if (normalized === 'ja' || normalized.indexOf('ja-') === 0) return 'ja';
+    if (normalized === 'ko' || normalized.indexOf('ko-') === 0) return 'ko';
+    return null;
+}
+  var language = canonicalize(raw);
+  var invalid = supplied && !language;
+  var strings = TEXT[language || LEGACY];
+  if (supplied && language) document.documentElement.lang = language;
+function t(key, values) {
+    if (!Object.prototype.hasOwnProperty.call(strings, key)) throw new Error('Missing recipe UI text: ' + key);
+    var text = strings[key];
+    if (!values) return text;
+    return text.replace(/\{([^}]+)\}/g, function (_, name) {
+      return Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : '';
+    });
+}
+function showError() {
+    var root = document.body || document.documentElement;
+    if (!root || document.querySelector('[data-recipe-ui-language-error]')) return;
+    var message = document.createElement('p');
+    message.setAttribute('data-recipe-ui-language-error', '');
+    message.setAttribute('role', 'alert');
+    message.style.cssText = 'margin:16px;font-family:system-ui,sans-serif;color:var(--text,#2A2622);';
+    message.textContent = TEXT.en.invalid;
+    root.insertBefore(message, root.firstChild);
+}
+  return { language: language || LEGACY, explicit: supplied, invalid: invalid, t: t, showError: showError };
+})();
+  if (ui.invalid) { ui.showError(); return; }
+  // Equal temperament, measured from the A above middle C. Twenty-five written
+  // frequencies would be twenty-five chances to mistype one, and the formula is
+  // shorter than the table it replaces.
+  var A4_HZ = 440;
+  var A4_MIDI = 69;
+  // The voice: a triangle wave, which has the thin upper harmonics a struck
+  // string has without the buzz of a saw. The peak is low because this card is
+  // played next to a conversation rather than into a room.
+  var WAVE = 'triangle';
+  var ATTACK_S = 0.008;
+  var DECAY_S = 1.2;
+  var RELEASE_S = 0.18;
+  var PEAK = 0.12;
+  // An exponential fade cannot arrive at silence itself, so it ends just above
+  // it and the note is stopped there.
+  var FLOOR = 0.0001;
+  var TYPED_KEYS = {
+    'z': 60, 's': 61, 'x': 62, 'd': 63, 'c': 64,
+    'v': 65, 'g': 66, 'b': 67, 'h': 68, 'n': 69,
+    'j': 70, 'm': 71, 'q': 72, '2': 73, 'w': 74,
+    '3': 75, 'e': 76, 'r': 77, '5': 78, 't': 79,
+    '6': 80, 'y': 81, '7': 82, 'u': 83, 'i': 84
+  };
+  var keyboard = document.getElementById('piano-keyboard');
+  document.getElementById('piano-card-label').textContent = ui.t('piano.card');
+  keyboard.setAttribute('aria-label', ui.t('piano.keyboard'));
+  var keyNodes = keyboard.querySelectorAll('.piano-key');
+  var nodeByMidi = {};
+  var audio = null;
+  var trackAvailable = false;
+  if (window.card && typeof window.card.capabilities === 'function') {
+    window.card.capabilities().then(function (envelope) {
+      var result = envelope && envelope.ok === true ? envelope.result : null;
+      var capabilities = result && result.capabilities ? result.capabilities : null;
+      var entry = capabilities && capabilities.track;
+      var status = entry && typeof entry === 'object' ? entry.status : '';
+      trackAvailable = status === 'available' || status === 'local_fallback';
+    }, function () {});
+  }
+  // The note sounding for a key, by that key. Absent means silent.
+  var voices = {};
+  // How many things are holding one key down.
+  var holders = {};
+  // Which notes each pointer is sounding, and whether that pointer is still down.
+  var pointerNotes = {};
+  var pointerDown = {};
+  // Which notes the computer keyboard is holding.
+  var typedNotes = {};
+  function frequencyOf(midi) {
+    return A4_HZ * Math.pow(2, (midi - A4_MIDI) / 12);
+  }
+  function midiOf(node) {
+    return Number(node.getAttribute('data-midi'));
+  }
+  // A browser only lets a page start making sound from inside a real press, so
+  // the audio is built in the press handler and kept for the rest of the
+  // sitting. Built any earlier it would be born suspended and the first note
+  // would be the one nobody hears.
+  function ensureAudio() {
+    var Ctor = window.AudioContext || window.webkitAudioContext;
+    if (typeof Ctor !== 'function') return;
+    if (!audio) audio = new Ctor();
+    if (audio.state !== 'suspended' || typeof audio.resume !== 'function') return;
+    var pending = audio.resume();
+    if (pending && typeof pending.catch === 'function') pending.catch(function () {});
+  }
+  function startVoice(midi) {
+    if (!audio || voices[midi]) return;
+    var at = audio.currentTime;
+    var osc = audio.createOscillator();
+    var level = audio.createGain();
+    osc.type = WAVE;
+    osc.frequency.value = frequencyOf(midi);
+    level.gain.setValueAtTime(FLOOR, at);
+    level.gain.exponentialRampToValueAtTime(PEAK, at + ATTACK_S);
+    level.gain.exponentialRampToValueAtTime(FLOOR, at + ATTACK_S + DECAY_S);
+    osc.connect(level);
+    level.connect(audio.destination);
+    osc.start(at);
+    // The note ends when it has fallen away, held or not.
+    osc.stop(at + ATTACK_S + DECAY_S + 0.05);
+    voices[midi] = { osc: osc, level: level };
+  }
+  function stopVoice(midi) {
+    var voice = voices[midi];
+    if (!voice || !audio) return;
+    delete voices[midi];
+    var at = audio.currentTime;
+    // The fall already under way is picked up where it has got to. Ramping
+    // without cancelling first would take the note back to full volume on its
+    // way out, which is a click rather than a release.
+    var current = voice.level.gain.value;
+    voice.level.gain.cancelScheduledValues(at);
+    voice.level.gain.setValueAtTime(current > FLOOR ? current : FLOOR, at);
+    voice.level.gain.exponentialRampToValueAtTime(FLOOR, at + RELEASE_S);
+    voice.osc.stop(at + RELEASE_S + 0.02);
+  }
+  function paintKey(midi, down) {
+    var node = nodeByMidi[midi];
+    if (node) node.setAttribute('data-down', down ? 'true' : 'false');
+  }
+  // Everything that can press a key comes through here, so there is one answer
+  // to whether a note is sounding however many ways it was started.
+  function recordNote(midi) {
+    if (!trackAvailable) return;
+    if (!window.card || typeof window.card.track !== 'function') return;
+    var node = nodeByMidi[midi];
+    var key = node && node.getAttribute('aria-label') ? node.getAttribute('aria-label') : String(midi);
+    var pending = window.card.track('note', { key: key, at: Date.now() });
+    if (pending && typeof pending.catch === 'function') pending.catch(function () {});
+  }
+  function holdNote(midi) {
+    holders[midi] = (holders[midi] || 0) + 1;
+    if (holders[midi] > 1) return;
+    startVoice(midi);
+    paintKey(midi, true);
+    recordNote(midi);
+  }
+  function dropNote(midi) {
+    if (!holders[midi]) return;
+    holders[midi] -= 1;
+    if (holders[midi] > 0) return;
+    delete holders[midi];
+    stopVoice(midi);
+    paintKey(midi, false);
+  }
+  // What one pointer is sounding. A press adds to that pointer's notes rather
+  // than replacing them, which is what lets a chord pressed through one pointer
+  // sound as a chord; a finger sliding across the keys never needs that,
+  // because leaving the key it was on has already ended the note.
+  function pointerTakes(id, midi) {
+    var held = pointerNotes[id] || (pointerNotes[id] = []);
+    for (var index = 0; index < held.length; index += 1) if (held[index] === midi) return;
+    held.push(midi);
+    holdNote(midi);
+  }
+  function pointerLets(id, midi) {
+    var held = pointerNotes[id];
+    if (!held) return;
+    for (var index = 0; index < held.length; index += 1) {
+      if (held[index] !== midi) continue;
+      held.splice(index, 1);
+      dropNote(midi);
+      return;
+    }
+  }
+  function pointerLetsAll(id) {
+    var held = pointerNotes[id];
+    if (!held) return;
+    delete pointerNotes[id];
+    while (held.length > 0) dropNote(held.pop());
+  }
+  function keyNodeFrom(target) {
+    if (!target || typeof target.closest !== 'function') return null;
+    return target.closest('.piano-key');
+  }
+  function onPointerDown(event) {
+    var node = event.currentTarget;
+    // A browser hands a touch pointer to the element the touch began on and
+    // reports every later move against that one key, however far the finger
+    // travels. Handing the capture back is what lets a finger dragged across
+    // the keyboard reach the next key at all.
+    if (typeof node.hasPointerCapture === 'function'
+      && typeof node.releasePointerCapture === 'function'
+      && node.hasPointerCapture(event.pointerId)) {
+      node.releasePointerCapture(event.pointerId);
+    }
+    // The press is the gesture a browser accepts as permission to make sound.
+    // Nothing here calls preventDefault: what a press inside a frame does by
+    // default is give that frame the focus, and without the focus the computer
+    // keyboard below never gets a key to play.
+    ensureAudio();
+    pointerDown[event.pointerId] = true;
+    pointerTakes(event.pointerId, midiOf(node));
+  }
+  function onPointerEnter(event) {
+    if (pointerDown[event.pointerId] !== true) return;
+    pointerTakes(event.pointerId, midiOf(event.currentTarget));
+  }
+  function onPointerLeave(event) {
+    if (pointerDown[event.pointerId] !== true) return;
+    pointerLets(event.pointerId, midiOf(event.currentTarget));
+  }
+  // Lifting over a key ends that key's note and leaves any other note the same
+  // pointer is holding to its own release; lifting anywhere else ends all of
+  // them, which is the case where a finger has slid off the keyboard entirely.
+  function onPointerUp(event) {
+    delete pointerDown[event.pointerId];
+    var node = keyNodeFrom(event.target);
+    if (node) {
+      pointerLets(event.pointerId, midiOf(node));
+      return;
+    }
+    pointerLetsAll(event.pointerId);
+  }
+  function onPointerCancel(event) {
+    delete pointerDown[event.pointerId];
+    pointerLetsAll(event.pointerId);
+  }
+  // A key name is looked up as the card's own rather than as a property of
+  // anything: 'constructor' is a keystroke like any other and must miss.
+  function typedMidi(key) {
+    var name = String(key).toLowerCase();
+    return Object.prototype.hasOwnProperty.call(TYPED_KEYS, name) ? TYPED_KEYS[name] : undefined;
+  }
+  function onKeyDown(event) {
+    // A held key repeats, and a repeat is the same press rather than a new one.
+    if (event.repeat === true) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    var midi = typedMidi(event.key);
+    if (midi === undefined) return;
+    event.preventDefault();
+    ensureAudio();
+    if (typedNotes[midi] === true) return;
+    typedNotes[midi] = true;
+    holdNote(midi);
+  }
+  function onKeyUp(event) {
+    var midi = typedMidi(event.key);
+    if (midi === undefined || typedNotes[midi] !== true) return;
+    delete typedNotes[midi];
+    dropNote(midi);
+  }
+  // A card that has lost the frame can no longer be told the finger or the key
+  // came off, and a note nobody is left able to stop is the one failure a piano
+  // must not have. So it assumes they did.
+  function releaseEverything() {
+    for (var id in pointerNotes) {
+      if (Object.prototype.hasOwnProperty.call(pointerNotes, id)) pointerLetsAll(id);
+    }
+    pointerDown = {};
+    for (var typed in typedNotes) {
+      if (Object.prototype.hasOwnProperty.call(typedNotes, typed)) dropNote(Number(typed));
+    }
+    typedNotes = {};
+  }
+  for (var index = 0; index < keyNodes.length; index += 1) {
+    var node = keyNodes[index];
+    nodeByMidi[midiOf(node)] = node;
+    node.addEventListener('pointerdown', onPointerDown);
+    // Enter and leave do not bubble, so they are asked of each key rather than
+    // of the keyboard: what the card needs to know is which key was crossed.
+    node.addEventListener('pointerenter', onPointerEnter);
+    node.addEventListener('pointerleave', onPointerLeave);
+  }
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerCancel);
+  // The host's own wrapper decides whether a key reaches the card at all: it
+  // blocks every key until the card has been pressed and again once the frame
+  // is blurred, which is what keeps this card from playing over someone typing
+  // elsewhere. Nothing here has to repeat that rule.
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', releaseEverything);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>showcard — an open specification for interactive card packages</title>
+<meta name="description" content="An open specification for HTML-first interactive card packages.">
+<style>
+  :root {
+    --paper: #faf7f2;
+    --ink: #2b2722;
+    --muted: #7d7466;
+    --rule: #d8d2c7;
+    --code-bg: #f3ede4;
+    --accent: #537d96;
+    --accent-deep: #3f6179;
+    --card-shadow: 0 4px 32px rgba(0, 0, 0, 0.05);
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", "Songti SC", "Songti TC", SimSun, serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #161513;
+      --ink: #c7c0b5;
+      --muted: #8a8073;
+      --rule: #2f2c27;
+      --code-bg: #1d1b18;
+      /* The same ink blue, lifted a step: on the dark paper the light-mode
+         value sits too close to the background to read as a link. */
+      --accent: #7fa3b8;
+      --accent-deep: #9dbdcf;
+      /* A soft shadow is invisible against dark paper, so it goes deeper and
+         the frame keeps leaning on its border to separate card from page. */
+      --card-shadow: 0 4px 32px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.75;
+    font-kerning: normal;
+  }
+  html[data-lang="en"] .zh,
+  html[data-lang="zh"] .en { display: none; }
+
+  .wrap { max-width: 680px; margin: 0 auto; padding: 0 24px; }
+  .wrap-wide { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+  section { padding: 4.6rem 0; border-top: 1px solid var(--rule); }
+  section > .wrap > *:first-child,
+  section > .wrap-wide > *:first-child { margin-top: 0; }
+
+  /* ---- corner language switch ---- */
+  .corner { display: flex; justify-content: flex-end; gap: 6px; align-items: baseline; padding-top: 20px; }
+  .corner button {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0;
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    padding: 2px 7px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .corner button:hover { color: var(--ink); }
+  .corner button[aria-pressed="true"] { color: var(--ink); border-color: var(--rule); }
+  .corner .sep { color: var(--rule); font-size: 13px; }
+
+  /* ---- 1. hero ---- */
+  .hero { border-top: 0; padding: 2.4rem 0 4.6rem; }
+  h1 {
+    margin: 0;
+    font-size: clamp(2.3rem, 7vw, 3.2rem);
+    font-weight: 400;
+    letter-spacing: 0.015em;
+    line-height: 1.1;
+  }
+  .hero-line {
+    margin: 1.9rem 0 0;
+    font-size: clamp(1.45rem, 4.4vw, 2.3rem);
+    line-height: 1.28;
+    letter-spacing: 0.005em;
+  }
+  .hero-line em { font-style: normal; color: var(--accent); }
+  .hero-sub { margin: 1.5rem 0 0; max-width: 33em; color: var(--muted); }
+  .hero-sub code { color: var(--ink); }
+
+  .ctas { display: flex; flex-wrap: wrap; gap: 12px; margin: 2.4rem 0 0; }
+  .cta {
+    display: inline-block;
+    padding: 11px 20px;
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 0.94rem;
+    letter-spacing: 0.03em;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .cta:hover { color: var(--accent-deep); border-color: var(--accent); }
+  .cta-quiet { color: var(--muted); }
+
+  /* ---- 2. the live row ---- */
+  h2 {
+    margin: 0;
+    font-size: clamp(1.28rem, 3.2vw, 1.7rem);
+    font-weight: 400;
+    line-height: 1.35;
+    letter-spacing: 0.005em;
+  }
+  .sub { margin: 0.9rem 0 0; color: var(--muted); font-size: 0.98rem; max-width: 40em; }
+
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin: 2.6rem 0 0; }
+  .cards figure { margin: 0; }
+  /* The frame is what has the corners: rounding the wrapper and hiding its
+     overflow clips the card's own square edges, so no card has to know it is
+     being displayed in a rounded one. */
+  .card-frame {
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #faf7f2;
+    box-shadow: var(--card-shadow);
+    line-height: 0;
+  }
+  .cards iframe {
+    display: block;
+    width: 100%;
+    height: 420px;
+    border: 0;
+    border-radius: 11px;
+    background: #faf7f2;
+  }
+  .cards figcaption { margin: 14px 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.6; }
+
+  /* ---- 3-6. prose ---- */
+  .body { margin: 1.6rem 0 0; }
+  .body:first-of-type { margin-top: 1.6rem; }
+
+  .ladder { margin: 2.2rem 0 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
+  .ladder li {
+    display: grid;
+    grid-template-columns: 4rem 1fr;
+    gap: 0 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .rung { font-size: 0.76rem; letter-spacing: 0.2em; color: var(--muted); padding-top: 0.45em; }
+  .rung-name { margin: 0; font-size: 1.02rem; }
+  .rung-what { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.92rem; line-height: 1.65; }
+  .verdict { margin: 1.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
+  .grant { margin: 2.4rem 0 0; padding-left: 18px; border-left: 1px solid var(--rule); }
+
+  pre {
+    margin: 1.8rem 0 0;
+    padding: 15px 17px;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.62;
+    tab-size: 2;
+  }
+  pre.command { font-size: 12.5px; }
+  code { font-family: var(--mono); font-size: 0.86em; }
+  pre code { font: inherit; font-size: inherit; }
+  .note { margin: 1.4rem 0 0; color: var(--muted); font-size: 0.95rem; }
+  .note code { color: var(--ink); }
+
+  /* ---- 7. faq ---- */
+  .faq { margin: 2.2rem 0 0; border-top: 1px solid var(--rule); }
+  .faq details { border-bottom: 1px solid var(--rule); }
+  .faq summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    padding: 15px 0;
+    cursor: pointer;
+    list-style: none;
+    font-size: 1rem;
+  }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after { content: "+"; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+  .faq details[open] summary::after { content: "\2013"; }
+  .faq summary:hover { color: var(--accent-deep); }
+  .faq p { margin: 0 0 16px; color: var(--muted); font-size: 0.95rem; max-width: 46em; }
+
+  footer {
+    padding: 2.4rem 0 4rem;
+    border-top: 1px solid var(--rule);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  footer p { margin: 0 0 6px; }
+  footer p:last-child { margin-bottom: 0; }
+
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  a:hover { border-bottom-color: currentColor; }
+  .cta, .corner button { border-bottom-color: var(--rule); }
+  :focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 860px) {
+    .cards { grid-template-columns: 1fr; gap: 32px; }
+  }
+  @media (max-width: 520px) {
+    body { font-size: 16px; }
+    .wrap, .wrap-wide { padding: 0 18px; }
+    section { padding: 3.4rem 0; }
+    .hero { padding: 1.8rem 0 3.4rem; }
+    pre { font-size: 11.5px; padding: 12px 13px; }
+    .ladder li { grid-template-columns: 3.2rem 1fr; }
+  }
+</style>
+<script src="examples/demo-host.js"></script>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="corner">
+    <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
+    <span class="sep">/</span>
+    <button type="button" data-set-lang="zh" aria-pressed="false">中文</button>
+  </div>
+</div>
+
+<main>
+
+  <!-- 1. hero -->
+  <section class="hero">
+    <div class="wrap">
+      <h1>showcard</h1>
+      <p class="hero-line en">Agents could speak, and act.<br>Now they can <em>show</em>.</p>
+      <p class="hero-line zh">Agent 会说，也会做。<br>现在，它开始<em>展示</em>。</p>
+      <p class="hero-sub en">Between plain HTML and a plugin system there has always been an empty seat:
+        something as light to write as a Skill, that still does most of what a plugin does. showcard
+        fills that seat.</p>
+      <p class="hero-sub zh">在纯 HTML 和插件系统之间，一直缺一个位置：写起来和写一个 Skill 一样轻，却能干插件的大部分活。showcard 补的就是这个位置。</p>
+      <p class="hero-sub en">It is an open standard for HTML-first interactive cards. A card can be one
+        <code>.card.html</code> file or a package with its own assets. A single-file card opens in any browser with a double-click — and inside your agent it
+        gains three powers: it can call tools, keep its state, and travel as a file. The specification and reference code are open source (CC BY + MIT).</p>
+      <p class="hero-sub zh">它是 HTML 交互卡片的开放标准：可以是单文件 <code>.card.html</code>，也可以是带图片等资产的目录包。单文件卡片双击即可打开；放进你的 Agent，它多出三样本事——能调用工具、能把状态存下来、能整个文件发给别人。规范与参考代码开源（CC BY + MIT）。</p>
+      <p class="ctas">
+        <a class="cta en" href="https://github.com/liliMozi/showcard/blob/main/spec/1.0.en.md">Read the specification</a>
+        <a class="cta zh" href="https://github.com/liliMozi/showcard/blob/main/spec/1.0.md">阅读规范</a>
+        <a class="cta cta-quiet en" href="https://github.com/liliMozi/showcard">View on GitHub</a>
+        <a class="cta cta-quiet zh" href="https://github.com/liliMozi/showcard">去 GitHub</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- 2. the live row -->
+  <section>
+    <div class="wrap-wide">
+      <h2><span class="en">Straightforward, efficient generative UI.</span><span class="zh">直白高效的生成式 UI</span></h2>
+      <p class="sub en">An Agent can create a Mini App in a single turn. With host capabilities, it can access websites, persist state, and live beyond the conversation.</p>
+      <p class="sub zh">Agent 能在一轮对话内生成 Mini App。接入宿主能力后，它就能访问网站、保存状态，并在对话结束后继续留存与使用。</p>
+
+      <div class="cards">
+        <figure>
+          <div class="card-frame"><iframe data-showcard="weather" src="examples/weather/index.html" sandbox="allow-scripts" loading="lazy" title="Shanghai weather card" scrolling="no"></iframe></div>
+          <figcaption class="en">Connect to websites through host capabilities and bring fresh data into the card. This preview shows a sample forecast.</figcaption>
+          <figcaption class="zh">通过宿主能力访问网站，把最新数据带进卡片。这张预览展示的是示例天气。</figcaption>
+        </figure>
+        <figure>
+          <div class="card-frame"><iframe data-showcard="piano" src="examples/piano/index.html" sandbox="allow-scripts" loading="lazy" title="Two-octave piano card" scrolling="no"></iframe></div>
+          <figcaption class="en">It can even make sound. Play two octaves right here, with a mouse, touch, or your keyboard.</figcaption>
+          <figcaption class="zh">它甚至还能发出声音。用鼠标、触摸或电脑键盘，直接弹奏两个八度。</figcaption>
+        </figure>
+        <figure>
+          <div class="card-frame"><iframe data-showcard="note" src="examples/note/index.html" sandbox="allow-scripts" loading="lazy" title="Paper note card" scrolling="no"></iframe></div>
+          <figcaption class="en">A Great Wall note. Keep its data in local storage and share the whole card as a portable package. <a href="examples/note/ARTWORK.md">Artwork credit</a>.</figcaption>
+          <figcaption class="zh">长城便笺。数据可以在本地持久保存，整张卡片也能轻松分享。<a href="examples/note/ARTWORK.md">图片署名</a>。</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. why -->
+  <section>
+    <div class="wrap">
+      <h2><span class="en">Simple, yet powerful.</span><span class="zh">简单，却强大。</span></h2>
+      <p class="body en">Weather panels, timers, checklists, little instruments: an Agent can turn an idea into a Mini App, as easy to author as a Skill, designed to cover 95% of everyday plugin work. Host capabilities give it tools, website access, and persistent state. Yet the result stays yours: an ordinary HTML package you can keep, share, version, and open again. It does not have to disappear into a conversation or stay tied to one platform. Simple to make, powerful to use, and worth keeping.</p>
+      <p class="body zh">天气面板、计时器、清单、小乐器：Agent 能把想法做成 Mini App，像 Skill 一样好写，目标是承接 95% 的日常插件工作。接入宿主，就有了工具、网站访问和持久状态；做出的东西仍是一份属于你的 HTML 包，可以保存、分享、管理版本，也可以日后重新打开。不必消失在聊天记录里，也不必依附某个平台。简单地做出来，强大地用起来，长久地留下来。</p>
+    </div>
+  </section>
+
+  <!-- 4. the trust ladder -->
+  <section>
+    <div class="wrap">
+      <h2><span class="en">The same card does more, depending on where it lives.</span><span class="zh">同一张卡，放的地方不同，能干的事不同。</span></h2>
+
+      <ol class="ladder">
+        <li>
+          <span class="rung">L0</span>
+          <div>
+            <p class="rung-name"><span class="en">Any browser</span><span class="zh">任意浏览器</span></p>
+            <p class="rung-what en">Double-click and it renders and plays. What you write is kept in the
+              browser's own storage; tool calls fail politely and the card stays usable. Nothing to
+              implement — every browser already is this.</p>
+            <p class="rung-what zh">双击就能看、能玩。写下的东西存在浏览器本地；工具调用会礼貌地失败，卡片照常可用。无需实现任何东西——每个浏览器天生就是它。</p>
+          </div>
+        </li>
+        <li>
+          <span class="rung">L1</span>
+          <div>
+            <p class="rung-name"><span class="en">State host</span><span class="zh">状态宿主</span></p>
+            <p class="rung-what en">Your app implements the minimal state read/write, and the host controls how long
+              the card’s state is kept.</p>
+            <p class="rung-what zh">你的应用实现最小的状态存取，状态保留多久由宿主决定。</p>
+          </div>
+        </li>
+        <li>
+          <span class="rung">L2</span>
+          <div>
+            <p class="rung-name"><span class="en">Gateway host</span><span class="zh">网关宿主</span></p>
+            <p class="rung-what en">Cards can now call the tools they declared — fetch a weather update, for
+              example — and every single item is asked of you first, then remembered.</p>
+            <p class="rung-what zh">卡片能调用它声明过的工具了——比如取一次天气数据——每一项都先问过你，答过的记住。</p>
+          </div>
+        </li>
+        <li>
+          <span class="rung">L3</span>
+          <div>
+            <p class="rung-name"><span class="en">Full host</span><span class="zh">完全宿主</span></p>
+            <p class="rung-what en">A full agent app. Cards can be pinned as small resident apps, operated by
+              the agent itself, and exported to share — each copy an independent fork.</p>
+            <p class="rung-what zh">完整的 Agent 应用。卡片能被钉成常驻的小应用、能被 Agent 直接操作、能随时导出分享——每份拷贝都是独立的拓本。</p>
+          </div>
+        </li>
+      </ol>
+
+      <p class="verdict en">Two ladders that do not convert into each other: hosts are graded L1 to L3, and
+        cards are not graded at all. A card has exactly one verdict — the L0 harmlessness test. Passing is
+        qualifying, and there is no higher grade.</p>
+      <p class="verdict zh">两把梯子互不换算：宿主按能力分 L1 到 L3，卡片不分级。一张卡只有一项判定——L0 无害性测试。通过即合格，没有更高一级。</p>
+
+      <p class="grant en">A card can ask. Only you can grant. What a card may reach is frozen in its
+        declaration — permission is asked per named thing, remembered per card, and expires the moment the
+        declaration changes.</p>
+      <p class="grant zh">卡片可以请求，点头只能是你。它能碰什么，在声明里冻结——授权按名目逐件询问、按卡片记忆，声明一变，授权即失效。</p>
+    </div>
+  </section>
+
+  <!-- 5. write one in a minute -->
+  <section>
+    <div class="wrap">
+      <h2><span class="en">Write a “plugin” in a minute</span><span class="zh">一分钟写一个“插件”</span></h2>
+
+<pre><code>&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+&lt;meta charset="utf-8"&gt;
+&lt;title&gt;Tokyo Weather&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+&lt;script type="application/json" data-card-manifest&gt;
+{
+  "spec": "1.0",
+  "display": { "preferredWidthPx": 384 },
+  "toolBindings": {
+    "refresh": {
+      "tool": "fetch.request",
+      "input": { "hosts": ["api.example-weather.com"] },
+      "description": "Refresh the weather"
+    }
+  }
+}
+&lt;/script&gt;
+
+&lt;style&gt;
+  .wx { font: 15px/1.6 system-ui; padding: 12px 16px; }
+  .wx b { font-size: 1.6rem; }
+&lt;/style&gt;
+
+&lt;div class="wx"&gt;
+  &lt;h3&gt;Tokyo Weather&lt;/h3&gt;
+  &lt;p&gt;&lt;b&gt;&lt;output data-persist="temp"&gt;23°C&lt;/output&gt;&lt;/b&gt;
+     &lt;span data-persist="cond"&gt;Cloudy&lt;/span&gt;&lt;/p&gt;
+  &lt;button data-invoke="refresh" data-result="refresh"&gt;Refresh&lt;/button&gt;
+&lt;/div&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+
+      <p class="note en">Check it against the static rules of chapter 9 — exit code 0 is clean:</p>
+      <p class="note zh">拿第 9 章的静态规则检查它，退出码 0 即干净：</p>
+<pre class="command"><code>node conformance/bin/check-card.mjs my-card.card.html</code></pre>
+
+      <p class="note en">Not one line of JavaScript — three declarative markers do the wiring.</p>
+      <p class="note zh">一行 JavaScript 都没有——三个声明式标记完成全部接线。</p>
+    </div>
+  </section>
+
+  <!-- 6. compatibility -->
+  <section>
+    <div class="wrap">
+      <h2><span class="en">Compatibility is a command, not a promise.</span><span class="zh">兼容性是一条命令，不是一句承诺。</span></h2>
+      <p class="body en">This repository ships a
+        <a href="https://github.com/liliMozi/showcard/tree/main/reference">reference host</a> you can read
+        in one sitting, and a
+        <a href="https://github.com/liliMozi/showcard/tree/main/conformance">conformance suite</a> any
+        third party can run against their own implementation: <code>npm test</code>. The rules of chapter 9
+        are not prose — they are runnable.</p>
+      <p class="body zh">仓库里带着一个<a href="https://github.com/liliMozi/showcard/tree/main/reference">一口气能读完的参考宿主</a>，和<a href="https://github.com/liliMozi/showcard/tree/main/conformance">任何第三方都能对自己实现跑起来的一致性套件</a>：<code>npm test</code>。第 9 章的规则不是散文，是可以执行的。</p>
+    </div>
+  </section>
+
+  <!-- 7. faq -->
+  <section>
+    <div class="wrap">
+      <h2><span class="en">Questions</span><span class="zh">几个问题</span></h2>
+
+      <div class="faq">
+        <details>
+          <summary><span class="en">Is this another plugin system?</span><span class="zh">这是不是又一个插件系统？</span></summary>
+          <p class="en">No. There is nothing to install and no registry to join. A card is a document — it opens
+            like one, travels like one, and is inspected like one.</p>
+          <p class="zh">不是。没有东西要安装，也没有市场要入驻。卡片是一份文档——像文档一样打开、像文档一样传递、像文档一样被审视。</p>
+        </details>
+        <details>
+          <summary><span class="en">How does it relate to plugins and Skills?</span><span class="zh">它和插件、Skill 是什么关系？</span></summary>
+          <p class="en">Think of it as a Skill you can touch. In the working-agent era, interaction matters
+            and graphical interfaces matter — and the agent's tool infrastructure is reusable: what a card
+            binds is exactly what your agent can already do. A Skill teaches the agent to do things;
+            showcard gives the results a face you can operate.</p>
+          <p class="zh">可以把它理解成能交互的 Skill。我们相信在 Working Agent 时代，交互很重要，图形界面也很重要；而 Agent 已有的工具基础设施可以直接复用——卡片能绑定的，正是你的 Agent 本来就会用的工具。Skill 教 Agent 做事，showcard 让成果长出界面、可以上手。</p>
+        </details>
+        <details>
+          <summary><span class="en">What can a card do without a host?</span><span class="zh">没有宿主它能干嘛？</span></summary>
+          <p class="en">Render and interact. Calls to host capabilities fail politely with a defined error
+            envelope, and the card stays usable — the spec calls this graceful degradation, and the suite tests
+            it.</p>
+          <p class="zh">渲染与交互。对宿主能力的调用会以规定的失败信封礼貌地失败，卡片保持可用——规范称之为优雅降级，套件会测它。</p>
+        </details>
+        <details>
+          <summary><span class="en">Can a card reach the network, or my files?</span><span class="zh">卡片能碰网络或我的文件吗？</span></summary>
+          <p class="en">Only what its manifest declares, and only after you allow it. Asks are per named host or
+            directory, remembered per card, and reset when the card's declaration changes. URL images and other passive media stay blocked until the host grants the relevant network access; package-local assets travel with the card.</p>
+          <p class="zh">只有声明过的，而且要你点头。询问按具体主机名或目录逐件进行，按卡片记忆，声明一变即重新来过。网址图片等被动媒体在宿主授予相应网络访问前会被拦截；包内图片则随卡片一起携带。</p>
+        </details>
+        <details>
+          <summary><span class="en">How do I check a card is legal?</span><span class="zh">怎么检查一张卡合规？</span></summary>
+          <p class="en">One command: <code>node conformance/bin/check-card.mjs my-card.card.html</code> — exit 0
+            is clean.</p>
+          <p class="zh">一条命令：<code>node conformance/bin/check-card.mjs my-card.card.html</code>，退出码 0 即干净。</p>
+        </details>
+        <details>
+          <summary><span class="en">Can I build a host?</span><span class="zh">我能实现一个宿主吗？</span></summary>
+          <p class="en">Yes — that is the point. Start from <code>reference/</code>, a minimal state host in
+            plain ES modules, and let <code>conformance/</code> grade you.</p>
+          <p class="zh">能，这正是目的。从 <code>reference/</code> 起步——纯 ES module 的最小状态宿主，让 <code>conformance/</code> 给你打分。</p>
+        </details>
+        <details>
+          <summary><span class="en">Who owns this?</span><span class="zh">这个规范归谁？</span></summary>
+          <p class="en">The specification is CC BY 4.0 and the reference/conformance code is MIT. Showcase recipes and artwork have their own licenses, listed below. The specification is maintained bilingually, with English canonical.</p>
+          <p class="zh">规范采用 CC BY 4.0，参考实现与一致性套件采用 MIT。展示配方和图片采用下方单独列出的许可。规范双语维护，以英文为准。</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="en">Specification text (<code>spec/</code>) is licensed under CC BY 4.0; the code
+      (<code>reference/</code>, <code>conformance/</code>) is licensed under the MIT license.</p>
+    <p class="zh">规范正文（<code>spec/</code>）采用 CC BY 4.0；代码（<code>reference/</code>、<code>conformance/</code>）采用 MIT 许可。</p>
+    <p class="en">Source: <a href="https://github.com/liliMozi/showcard">github.com/liliMozi/showcard</a></p>
+    <p class="zh">源码：<a href="https://github.com/liliMozi/showcard">github.com/liliMozi/showcard</a></p>
+  </div>
+<p class="wrap en">Showcase recipes: <a href="examples/LICENSE-RECIPES">Apache-2.0</a>. Reference runtime: <a href="examples/LICENSE-RUNTIME">MIT</a>. <a href="examples/note/ARTWORK.md">Great Wall artwork: CC BY-SA 3.0</a>.</p>
+<p class="wrap zh">展示配方：<a href="examples/LICENSE-RECIPES">Apache-2.0</a>。参考运行时：<a href="examples/LICENSE-RUNTIME">MIT</a>。<a href="examples/note/ARTWORK.md">长城图片：CC BY-SA 3.0</a>。</p>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var buttons = document.querySelectorAll('[data-set-lang]');
+    function apply(lang) {
+      root.setAttribute('data-lang', lang);
+      document.querySelectorAll('iframe[data-showcard]').forEach(function(frame) {
+        var next = 'examples/' + frame.getAttribute('data-showcard') + '/index' + (lang === 'en' ? '' : '.' + lang) + '.html';
+        if (frame.getAttribute('src') !== next) frame.setAttribute('src', next);
+      });
+      root.setAttribute('lang', lang === 'zh' ? 'zh-Hans' : 'en');
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].setAttribute(
+          'aria-pressed',
+          buttons[i].getAttribute('data-set-lang') === lang ? 'true' : 'false'
+        );
+      }
+    }
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener('click', function (event) {
+        apply(event.currentTarget.getAttribute('data-set-lang'));
+      });
+    }
+    apply('en');
+  })();
+</script>
+</body>
+</html>

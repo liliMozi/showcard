@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Package relative assets probe</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<p data-probe-static>A card package's own assets/ resolve by an ordinary relative reference, the same as any static site (section 1.1).</p>
+<p id="probe-styled-target">this text is styled by the package's own stylesheet, if the reference resolved</p>
+<img id="probe-marker-image" src="assets/marker.svg" alt="a marker the package carries itself" width="12" height="12">
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+
+  // Section 1.1 / 1.2: assets/style.css is a same-package relative reference,
+  // no different from any static site's. It sets a color no browser default
+  // would ever produce, so its presence in the computed style is unambiguous.
+  function checkStylesheet() {
+    var target = document.getElementById('probe-styled-target');
+    var color = window.getComputedStyle(target).color;
+    var resolved = color === 'rgb(1, 2, 3)';
+    say('package-stylesheet-resolved', resolved,
+      resolved
+        ? 'the package own stylesheet applied, resolved against the served package root'
+        : 'the computed color was ' + color + ', not the value assets/style.css sets - the relative reference did not resolve');
+  }
+
+  // Same proof, for a binary asset rather than text: an <img> reference into
+  // assets/ has to resolve against the package's own served location the
+  // same way a browser resolves any relative reference on any static site.
+  //
+  // This checks the resolved URL rather than a completed decode: whether the
+  // bytes actually arrive and decode into a picture is a real-browser
+  // question this environment cannot answer (no image codec is wired into a
+  // bare jsdom install), and it is covered elsewhere, at the HTTP layer, by
+  // the reference host's own serving tests rather than by a card probe --
+  // see conformance/README.md's manual-verification list.
+  function checkImageReference() {
+    var image = document.getElementById('probe-marker-image');
+    var expected = new URL('assets/marker.svg', document.baseURI).href;
+    var resolved = image.src === expected;
+    say('package-image-reference-resolved', resolved,
+      resolved
+        ? 'the image reference resolved to ' + image.src + ', inside the served package'
+        : 'the image src resolved to ' + image.src + ', not the expected ' + expected);
+  }
+
+  function main() {
+    checkStylesheet();
+    checkImageReference();
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

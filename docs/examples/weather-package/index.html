@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Shanghai Weather (package)</title>
+<link rel="stylesheet" href="assets/style.css">
+
+<script type="application/json" data-card-manifest>
+{
+  "spec": "1.0",
+  "display": { "preferredWidthPx": 340 },
+  "toolBindings": {
+    "refresh": {
+      "tool": "fetch.request",
+      "input": { "hosts": ["api.open-meteo.com"] },
+      "description": "Refresh the Shanghai forecast"
+    }
+  }
+}
+</script>
+
+<!-- data-card-state: a host burns the real reading in here at mint or export
+     time (sections 1.5, 5.3, 6.4). Written by hand here, this is exactly the
+     shape a mint or an export leaves behind — an L0 open, or this file
+     sitting unopened in a history list, still has a real number to show. -->
+<script type="application/json" data-card-state>
+{ "temp": "18°C", "cond": "Partly cloudy, wind from the north" }
+</script>
+</head>
+<body>
+
+<article class="wx">
+  <div class="wx-hero">
+    <!-- A package asset, referenced the way any static site references one —
+         no base64, no size ceiling (section 1.2). This is the whole point of
+         the package shape: the picture is a file next to index.html, not text
+         inside it. -->
+    <img class="wx-sky" src="assets/hero.webp" alt="" width="960" height="960">
+    <div class="wx-over">
+      <p class="wx-city">Shanghai</p>
+      <p class="wx-now"><output class="wx-temp" data-persist="temp">18</output><span class="wx-unit">&deg;C</span></p>
+    </div>
+  </div>
+
+  <div class="wx-body">
+    <p class="wx-cond" data-persist="cond">Partly cloudy, wind from the north</p>
+
+    <!-- Section 2.7: the button is wired declaratively. data-invoke calls the
+         binding the manifest declared, data-result renders what came back.
+         No script at all — the same zero-script card the old inlined example
+         is, just served from a package instead of a single file. -->
+    <p class="wx-foot">
+      <button class="wx-refresh" type="button" data-invoke="refresh">Refresh</button>
+      <output class="wx-out" data-result="refresh"></output>
+    </p>
+
+    <p class="wx-note" id="wx-standalone" hidden>
+      No host here: Refresh answers <code>CARD_HOST_TOOL_UNAVAILABLE</code>, so this is the burned-in reading.
+    </p>
+  </div>
+</article>
+
+<script>
+  /* Section 3.4: a well-mannered card asks the way at startup and annotates
+     the controls that need a host. */
+  (function () {
+    var note = document.getElementById('wx-standalone');
+    if (!note || !window.card || typeof window.card.capabilities !== 'function') { return; }
+    window.card.capabilities().then(function (envelope) {
+      var answered = envelope && envelope.ok && envelope.result && envelope.result.capabilities;
+      var invoke = answered ? envelope.result.capabilities.invoke : 'requires_host';
+      if (invoke === 'requires_host') { note.hidden = false; }
+    });
+  })();
+</script>
+
+</body>
+</html>

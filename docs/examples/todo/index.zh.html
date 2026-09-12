@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="zh" data-card-sizing="viewport">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' data:; style-src 'unsafe-inline' data:; img-src 'self' data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'">
+<script>/* showcard reference injection layer */
+(function () {
+  'use strict';
+
+  // Section 6.2 / 2.2: first definition wins. A host injects before the file's
+  // own shim, so the shim finds window.card already there and steps aside.
+  if (window.card) { return; }
+
+  var K = {
+  "CODES": {
+    "CAPABILITY_REQUIRED": "CARD_HOST_CAPABILITY_REQUIRED",
+    "CAPABILITY_NOT_SUPPORTED": "CARD_HOST_CAPABILITY_NOT_SUPPORTED",
+    "TOOL_UNAVAILABLE": "CARD_HOST_TOOL_UNAVAILABLE",
+    "TIMEOUT": "CARD_HOST_TIMEOUT",
+    "POST_FAILED": "CARD_HOST_POST_FAILED",
+    "INVALID_RESPONSE": "CARD_HOST_INVALID_RESPONSE",
+    "STATE_TOO_LARGE": "CARD_HOST_STATE_TOO_LARGE",
+    "STORAGE_UNAVAILABLE": "CARD_HOST_STORAGE_UNAVAILABLE",
+    "STORAGE_FAILED": "CARD_HOST_STORAGE_FAILED",
+    "CONTRACT_UNSUPPORTED": "CARD_HOST_CONTRACT_UNSUPPORTED",
+    "RATE_LIMITED": "CARD_HOST_RATE_LIMITED",
+    "TOOL_FAILED": "CARD_HOST_TOOL_FAILED",
+    "INVALID_INPUT": "CARD_HOST_INVALID_INPUT",
+    "NO_ROUTE": "CARD_HOST_EMIT_NO_ROUTE"
+  },
+  "CAP": {
+    "STATE_GET": "state.get",
+    "STATE_SET": "state.set",
+    "INVOKE": "invoke",
+    "CAPABILITIES": "capabilities",
+    "EMIT": "emit"
+  },
+  "REQUEST_TYPE": "card:request",
+  "RESPONSE_TYPE": "card:response",
+  "TIMEOUT_MS": 5000,
+  "STATE_BUDGET_BYTES": 65536,
+  "STATE_KEY_PREFIX": "card-state:"
+};
+  var CODES = K.CODES;
+  var CAP = K.CAP;
+  var doc = window.document;
+  var requestCounter = 0;
+
+  function isPlainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function describe(error) {
+    if (!error) { return 'unknown error'; }
+    if (typeof error === 'string') { return error; }
+    return String(error.message || error);
+  }
+
+  function ok(result) {
+    return { ok: true, result: isPlainObject(result) ? result : {} };
+  }
+
+  function fail(code, error) {
+    return { ok: false, code: code, error: error || code, result: {} };
+  }
+
+  // Section 2.4: an answer is only an envelope if it says whether it succeeded,
+  // and a failure has to name its code. Anything else is an invalid response.
+  function normalizeEnvelope(raw) {
+    if (!raw || typeof raw !== 'object') { return null; }
+    if (raw.ok === true) {
+      return { ok: true, result: isPlainObject(raw.result) ? raw.result : {} };
+    }
+    if (raw.ok === false) {
+      if (typeof raw.code !== 'string' || raw.code === '') { return null; }
+      return {
+        ok: false,
+        code: raw.code,
+        error: typeof raw.error === 'string' ? raw.error : raw.code,
+        result: isPlainObject(raw.result) ? raw.result : {}
+      };
+    }
+    return null;
+  }
+
+  function byteLength(text) {
+    var Encoder = window.TextEncoder || (typeof TextEncoder === 'function' ? TextEncoder : null);
+    if (Encoder) { return new Encoder().encode(text).length; }
+    var bytes = 0;
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      if (code < 0x80) { bytes += 1; }
+      else if (code < 0x800) { bytes += 2; }
+      else if (code >= 0xd800 && code <= 0xdbff) { bytes += 4; i++; }
+      else { bytes += 3; }
+    }
+    return bytes;
+  }
+
+  // Section 1.3: identity is never burned into the package; a document carries
+  // no id of its own to key a fallback store by. Section 2.5 derives the key
+  // from the document's own address instead — location.pathname or an
+  // equivalent stable identifier — which is exactly how a plain web page's
+  // storage is already partitioned: two different paths get two different
+  // buckets with no id field required to make that true.
+  function readLocationKey() {
+    try {
+      var path = window.location && window.location.pathname;
+      return path ? String(path) : '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function getStorage() {
+    try {
+      return window.localStorage || null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function storageKey() {
+    var path = readLocationKey();
+    return path ? K.STATE_KEY_PREFIX + path : '';
+  }
+
+  function readLocalState() {
+    var storage = getStorage();
+    if (!storage) {
+      return { error: fail(CODES.STORAGE_UNAVAILABLE, 'local storage is not available') };
+    }
+    var key = storageKey();
+    if (!key) {
+      return {
+        error: fail(
+          CODES.STORAGE_UNAVAILABLE,
+          'no location path is available to derive a fallback storage key from'
+        )
+      };
+    }
+    var raw;
+    try {
+      raw = storage.getItem(key);
+    } catch (error) {
+      return { error: fail(CODES.STORAGE_UNAVAILABLE, 'local storage read failed: ' + describe(error)) };
+    }
+    if (raw === null || raw === undefined || raw === '') { return { state: {} }; }
+    var parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      // An unreadable fallback payload reads as empty state; there is no code in
+      // section 2.6 for corrupt local storage, and refusing to open would break
+      // the section 9.2 harmlessness guarantee.
+      return { state: {} };
+    }
+    return { state: isPlainObject(parsed) ? parsed : {} };
+  }
+
+  function writeLocalState(nextState) {
+    var storage = getStorage();
+    if (!storage) {
+      return fail(CODES.STORAGE_UNAVAILABLE, 'local storage is not available');
+    }
+    var key = storageKey();
+    if (!key) {
+      return fail(
+        CODES.STORAGE_UNAVAILABLE,
+        'no location path is available to derive a fallback storage key from'
+      );
+    }
+    var serialized;
+    try {
+      serialized = JSON.stringify(nextState);
+    } catch (error) {
+      return fail(CODES.STORAGE_FAILED, 'the state could not be serialized: ' + describe(error));
+    }
+    // Section 2.5: refuse, never truncate.
+    if (byteLength(serialized) > K.STATE_BUDGET_BYTES) {
+      return fail(
+        CODES.STATE_TOO_LARGE,
+        'the serialized state exceeds the ' + K.STATE_BUDGET_BYTES + ' byte budget'
+      );
+    }
+    try {
+      storage.setItem(key, serialized);
+    } catch (error) {
+      return fail(CODES.STORAGE_FAILED, 'local storage write failed: ' + describe(error));
+    }
+    return ok({ state: nextState });
+  }
+
+  function standaloneStateGet(payload) {
+    var read = readLocalState();
+    if (read.error) { return read.error; }
+    var key = payload && typeof payload.key === 'string' ? payload.key : null;
+    if (key === null) { return ok({ state: read.state }); }
+    return ok({ key: key, value: read.state[key] });
+  }
+
+  function standaloneStateSet(payload) {
+    if (!payload || typeof payload !== 'object') {
+      return fail(CODES.INVALID_INPUT, 'state.set needs a key and a value, or a whole state object');
+    }
+    if (isPlainObject(payload.state)) {
+      return writeLocalState(payload.state);
+    }
+    if (typeof payload.key === 'string' && payload.key !== '') {
+      var read = readLocalState();
+      if (read.error) { return read.error; }
+      var next = {};
+      for (var name in read.state) {
+        if (Object.prototype.hasOwnProperty.call(read.state, name)) { next[name] = read.state[name]; }
+      }
+      next[payload.key] = payload.value;
+      return writeLocalState(next);
+    }
+    return fail(CODES.INVALID_INPUT, 'state.set needs a key and a value, or a whole state object');
+  }
+
+  // Section 3.1 / 3.4: tell the card the truth about where it is.
+  function standaloneCapabilities() {
+    return ok({
+      environment: 'standalone',
+      capabilities: { state: 'local_fallback', invoke: 'requires_host', emit: 'requires_host' }
+    });
+  }
+
+  function requestStandalone(capability, payload) {
+    if (capability === CAP.CAPABILITIES) { return standaloneCapabilities(); }
+    if (capability === CAP.STATE_GET) { return standaloneStateGet(payload); }
+    if (capability === CAP.STATE_SET) { return standaloneStateSet(payload); }
+    // Section 2.3 / 3.4: emit is a named convenience, not a tool. Standalone
+    // it is unsupported; the default below would otherwise call it a missing
+    // tool channel.
+    if (capability === CAP.EMIT) {
+      return fail(CODES.CAPABILITY_NOT_SUPPORTED, 'this card is open without a host, so emit is not available');
+    }
+    // Section 3.4: outside a host there is no tool channel at all.
+    return fail(CODES.TOOL_UNAVAILABLE, 'this card is open without a host, so there is no tool channel');
+  }
+
+  // Section 2.8: postMessage, card: prefix, paired by requestId.
+  function requestFromHost(capability, payload) {
+    return new Promise(function (resolve) {
+      requestCounter += 1;
+      var requestId = 'card-' + requestCounter + '-' + Math.random().toString(36).slice(2, 10);
+      var settled = false;
+      var timer = null;
+
+      function settle(envelope) {
+        if (settled) { return; }
+        settled = true;
+        if (timer !== null) { window.clearTimeout(timer); timer = null; }
+        window.removeEventListener('message', onMessage);
+        resolve(envelope);
+      }
+
+      function onMessage(event) {
+        var data = event ? event.data : null;
+        if (!data || typeof data !== 'object') { return; }
+        if (data.type !== K.RESPONSE_TYPE) { return; }
+        if (data.requestId !== requestId) { return; }
+        var envelope = normalizeEnvelope(data);
+        settle(envelope || fail(CODES.INVALID_RESPONSE, 'the host answer is not a valid envelope'));
+      }
+
+      window.addEventListener('message', onMessage);
+
+      try {
+        window.parent.postMessage({
+          type: K.REQUEST_TYPE,
+          requestId: requestId,
+          capability: capability,
+          payload: payload === undefined ? null : payload
+        }, '*');
+      } catch (error) {
+        settle(fail(CODES.POST_FAILED, 'the request could not be delivered: ' + describe(error)));
+        return;
+      }
+
+      timer = window.setTimeout(function () {
+        settle(fail(CODES.TIMEOUT, 'the host did not answer within ' + K.TIMEOUT_MS + ' ms'));
+      }, K.TIMEOUT_MS);
+    });
+  }
+
+  // Section 2.3: one dispatch point, five named conveniences on top of it.
+  function request(capability, payload) {
+    if (typeof capability !== 'string' || capability === '') {
+      return Promise.resolve(fail(CODES.CAPABILITY_REQUIRED, 'a capability name is required'));
+    }
+    if (window.parent !== window) {
+      return requestFromHost(capability, payload);
+    }
+    return Promise.resolve(requestStandalone(capability, payload));
+  }
+
+  // Section 2.3: userGesture is collected here. Authors cannot fill it;
+  // a host that routes emit must ignore a value the author wrote.
+  function readUserGesture() {
+    try {
+      if (window.navigator && window.navigator.userActivation && typeof window.navigator.userActivation.isActive === 'boolean') {
+        return window.navigator.userActivation.isActive === true;
+      }
+    } catch (err) {}
+    try {
+      return !!(window.event && window.event.isTrusted);
+    } catch (err) {}
+    return false;
+  }
+
+  var card = {
+    state: {
+      get: function (key) {
+        if (key === undefined || key === null) { return request(CAP.STATE_GET, { key: null }); }
+        if (typeof key !== 'string' || key === '') {
+          return Promise.resolve(fail(CODES.INVALID_INPUT, 'state.get takes a string key, or nothing at all'));
+        }
+        return request(CAP.STATE_GET, { key: key });
+      },
+      set: function (keyOrState, value) {
+        if (typeof keyOrState === 'string' && keyOrState !== '') {
+          return request(CAP.STATE_SET, { key: keyOrState, value: value });
+        }
+        if (isPlainObject(keyOrState)) {
+          return request(CAP.STATE_SET, { state: keyOrState });
+        }
+        return Promise.resolve(
+          fail(CODES.INVALID_INPUT, 'state.set takes (key, value) or a whole state object')
+        );
+      }
+    },
+    invoke: function (bindingId, input) {
+      if (typeof bindingId !== 'string' || bindingId === '') {
+        return Promise.resolve(fail(CODES.INVALID_INPUT, 'invoke takes a binding id declared in the manifest'));
+      }
+      return request(CAP.INVOKE, { bindingId: bindingId, input: input === undefined ? null : input });
+    },
+    emit: function (name, payload, to) {
+      if (typeof name !== 'string' || name === '') {
+        return Promise.resolve(fail(CODES.INVALID_INPUT, 'emit takes an event name'));
+      }
+      var wire = {
+        name: name,
+        payload: payload === undefined ? null : payload,
+        userGesture: readUserGesture()
+      };
+      if (typeof to === 'string' && to !== '') wire.to = to;
+      return request(CAP.EMIT, wire);
+    },
+    request: request,
+    capabilities: function () {
+      return request(CAP.CAPABILITIES, null);
+    }
+  };
+
+  window.card = card;
+
+  /* ---- Section 2.7: the three declarative markers ------------------------
+     Every marker below goes through the public window.card surface, so any
+     sugar behaviour has a hand-written equivalent (section 9.4).           */
+
+  var NATIVELY_ACTIVATED = { BUTTON: true, A: true, INPUT: true, SELECT: true, TEXTAREA: true };
+  var FORM_CONTROLS = { INPUT: true, TEXTAREA: true, SELECT: true };
+
+  function attributeSelector(name, value) {
+    return '[' + name + '="' + String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
+  }
+
+  function textify(value) {
+    if (value === null || value === undefined) { return ''; }
+    if (typeof value === 'string') { return value; }
+    if (typeof value === 'number' || typeof value === 'boolean') { return String(value); }
+    if (isPlainObject(value) && Object.keys(value).length === 0) { return ''; }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function closestMatch(node, selector) {
+    var element = node && node.nodeType === 3 ? node.parentNode : node;
+    if (!element || typeof element.closest !== 'function') { return null; }
+    return element.closest(selector);
+  }
+
+  function serializeForm(form) {
+    var data = {};
+    var FormDataCtor = window.FormData || (typeof FormData === 'function' ? FormData : null);
+    if (!form || !FormDataCtor) { return data; }
+    var entries = new FormDataCtor(form).entries();
+    var step = entries.next();
+    while (!step.done) {
+      var name = step.value[0];
+      var value = step.value[1];
+      if (Object.prototype.hasOwnProperty.call(data, name)) {
+        if (Array.isArray(data[name])) { data[name].push(value); }
+        else { data[name] = [data[name], value]; }
+      } else {
+        data[name] = value;
+      }
+      step = entries.next();
+    }
+    return data;
+  }
+
+  // Section 2.7: a container shows the latest result of its binding, as text.
+  // textContent only: the injection layer never writes markup into the card.
+  function renderResult(bindingId, envelope) {
+    if (!doc || typeof doc.querySelectorAll !== 'function') { return; }
+    var targets = doc.querySelectorAll(attributeSelector('data-result', bindingId));
+    var text = textify(envelope && envelope.result);
+    for (var i = 0; i < targets.length; i++) {
+      targets[i].textContent = text;
+    }
+  }
+
+  function activateInvoker(element) {
+    var bindingId = element.getAttribute('data-invoke');
+    if (!bindingId) { return; }
+    var form = typeof element.closest === 'function' ? element.closest('form') : null;
+    var input = form ? serializeForm(form) : undefined;
+    window.card.invoke(bindingId, input).then(function (envelope) {
+      renderResult(bindingId, envelope);
+    });
+  }
+
+  function readControl(element) {
+    if (element.type === 'checkbox') { return !!element.checked; }
+    if (element.type === 'radio') { return element.checked ? element.value : undefined; }
+    return element.value;
+  }
+
+  function writeControl(element, value) {
+    if (element.type === 'checkbox') { element.checked = !!value; return; }
+    if (element.type === 'radio') { element.checked = element.value === value; return; }
+    element.value = value === null || value === undefined ? '' : String(value);
+  }
+
+  function hydratePersistedControls() {
+    if (!doc || typeof doc.querySelectorAll !== 'function') { return; }
+    var controls = doc.querySelectorAll('[data-persist]');
+    if (!controls.length) { return; }
+    window.card.state.get().then(function (envelope) {
+      if (!envelope.ok) { return; }
+      var state = isPlainObject(envelope.result.state) ? envelope.result.state : {};
+      for (var i = 0; i < controls.length; i++) {
+        var control = controls[i];
+        if (!FORM_CONTROLS[control.tagName]) { continue; }
+        var key = control.getAttribute('data-persist');
+        if (key && Object.prototype.hasOwnProperty.call(state, key)) {
+          writeControl(control, state[key]);
+        }
+      }
+    });
+  }
+
+  if (doc && typeof doc.addEventListener === 'function') {
+    doc.addEventListener('click', function (event) {
+      var element = closestMatch(event.target, '[data-invoke]');
+      if (!element) { return; }
+      // Section 7.1: a card never submits a form outbound; the binding is the
+      // only channel, so the native submission is cancelled here.
+      if (typeof element.closest === 'function' && element.closest('form')) {
+        event.preventDefault();
+      }
+      activateInvoker(element);
+    }, true);
+
+    doc.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter') { return; }
+      var element = closestMatch(event.target, '[data-invoke]');
+      if (!element) { return; }
+      // Buttons and links already turn Enter into a click; handling it again
+      // here would fire the binding twice.
+      if (NATIVELY_ACTIVATED[element.tagName]) { return; }
+      event.preventDefault();
+      activateInvoker(element);
+    }, true);
+
+    doc.addEventListener('change', function (event) {
+      var element = event.target;
+      if (!element || typeof element.getAttribute !== 'function') { return; }
+      if (!FORM_CONTROLS[element.tagName]) { return; }
+      var key = element.getAttribute('data-persist');
+      if (!key) { return; }
+      var value = readControl(element);
+      if (value === undefined) { return; }
+      window.card.state.set(key, value);
+    }, true);
+
+    if (doc.readyState === 'loading') {
+      doc.addEventListener('DOMContentLoaded', hydratePersistedControls, { once: true });
+    } else {
+      hydratePersistedControls();
+    }
+  }
+})();
+</script>
+<script>(function () {
+  if (window.__cardPlaceholderInstalled) { return; }
+  window.__cardPlaceholderInstalled = true;
+
+  var MARKER = "data-card-placeholder";
+  var REASON = "This resource is no longer where it was";
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  /* Above this width the slot has room for a sentence; at or below it the
+     placeholder is standing in for an avatar or an icon and says less. */
+  var COMPACT_MAX_PX = 120;
+
+  var CSS = [
+    '.card-placeholder{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;',
+    'justify-content:center;gap:.35em;max-width:100%;min-width:2.5em;min-height:2.5em;padding:.75em;',
+    'border:1px solid var(--rule,rgba(128,128,128,.35));border-radius:8px;',
+    'background:var(--well,rgba(128,128,128,.08));color:var(--ink,inherit);text-align:center;overflow:hidden}',
+    '.card-placeholder--compact{gap:.2em;padding:.35em;border-radius:6px}',
+    '.card-placeholder__icon{width:28px;height:28px;flex:none;opacity:.55}',
+    '.card-placeholder--compact .card-placeholder__icon{width:18px;height:18px}',
+    '.card-placeholder__alt{font-size:.86rem;line-height:1.3}',
+    '.card-placeholder__reason{font-size:.72rem;line-height:1.3;opacity:.65;color:var(--muted,inherit)}'
+  ].join('');
+
+  function installStyle() {
+    if (document.getElementById('card-placeholder-style')) { return; }
+    var style = document.createElement('style');
+    style.id = 'card-placeholder-style';
+    style.textContent = CSS;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function svg(name, attributes) {
+    var node = document.createElementNS(SVG_NS, name);
+    for (var key in attributes) {
+      if (Object.prototype.hasOwnProperty.call(attributes, key)) {
+        node.setAttribute(key, attributes[key]);
+      }
+    }
+    return node;
+  }
+
+  /* A picture frame with a hill and a sun in it: the drawing every reader
+     already knows means "there was an image here". */
+  function icon() {
+    var root = svg('svg', {
+      'class': 'card-placeholder__icon',
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': '1.5',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      'aria-hidden': 'true'
+    });
+    root.appendChild(svg('rect', { x: '3', y: '5', width: '18', height: '14', rx: '2' }));
+    root.appendChild(svg('path', { d: 'M5 17.2l4.3-4.7 3.1 3.2L16 12l3 3.4' }));
+    root.appendChild(svg('circle', { cx: '9', cy: '9.4', r: '1.4' }));
+    return root;
+  }
+
+  function measure(node) {
+    var declaredWidth = parseFloat(node.getAttribute('width'));
+    var declaredHeight = parseFloat(node.getAttribute('height'));
+    var rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null;
+    return {
+      width: isFinite(declaredWidth) && declaredWidth > 0 ? declaredWidth : (rect && rect.width > 1 ? rect.width : 0),
+      height: isFinite(declaredHeight) && declaredHeight > 0 ? declaredHeight : (rect && rect.height > 1 ? rect.height : 0)
+    };
+  }
+
+  function build(node) {
+    var size = measure(node);
+    var alt = node.getAttribute ? (node.getAttribute('alt') || '') : '';
+    var compact = size.width > 0 && size.width <= COMPACT_MAX_PX;
+
+    var box = document.createElement('div');
+    box.setAttribute(MARKER, '');
+    box.setAttribute('role', 'img');
+    box.className = compact ? 'card-placeholder card-placeholder--compact' : 'card-placeholder';
+    box.setAttribute('aria-label', alt ? alt + '. ' + REASON : REASON);
+    if (size.width > 0) { box.style.width = size.width + 'px'; }
+    if (size.width > 0 && size.height > 0) {
+      box.style.aspectRatio = size.width + ' / ' + size.height;
+    } else if (size.height > 0) {
+      box.style.height = size.height + 'px';
+    }
+
+    box.appendChild(icon());
+    if (alt) {
+      var altLine = document.createElement('span');
+      altLine.className = 'card-placeholder__alt';
+      altLine.textContent = alt;
+      box.appendChild(altLine);
+    }
+    /* The reason line is dropped in a compact slot only when the alt text is
+       already carrying the message; with no alt there would be nothing left. */
+    if (!compact || !alt) {
+      var reasonLine = document.createElement('span');
+      reasonLine.className = 'card-placeholder__reason';
+      reasonLine.textContent = REASON;
+      box.appendChild(reasonLine);
+    }
+    return box;
+  }
+
+  function replace(node) {
+    if (!node || node.__cardPlaceholderDone || !node.parentNode) { return; }
+    node.__cardPlaceholderDone = true;
+    installStyle();
+    node.parentNode.replaceChild(build(node), node);
+  }
+
+  /* A <source> that fails inside a <picture> is not a failure the reader sees:
+     the browser moves on to the next candidate and the <img> reports for the
+     whole element if nothing works. Inside a media element there is no such
+     spokesman, so the parent is examined once the browser has settled — and
+     only replaced if it ended up with no usable source at all. */
+  function considerSourceParent(parent) {
+    if (!parent || !parent.tagName) { return; }
+    var tag = parent.tagName.toUpperCase();
+    if (tag !== 'VIDEO' && tag !== 'AUDIO') { return; }
+    window.setTimeout(function () {
+      if (parent.networkState === parent.NETWORK_NO_SOURCE) { replace(parent); }
+    }, 0);
+  }
+
+  /* Resource errors do not bubble; the capture phase is the only place a single
+     listener can see all of them. */
+  window.addEventListener('error', function (event) {
+    var node = event.target;
+    if (!node || node === window || !node.tagName) { return; }
+    var tag = node.tagName.toUpperCase();
+    if (tag === 'IMG' || tag === 'VIDEO' || tag === 'AUDIO') {
+      replace(node);
+      return;
+    }
+    if (tag === 'SOURCE') { considerSourceParent(node.parentNode); }
+  }, true);
+})();</script>
+
+<!-- Recipe adapted from OpenHanako. Licensed under Apache-2.0; see ../LICENSE-RECIPES. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>To-do list</title>
+<style data-showcase-theme>
+:root{color-scheme:light;--bg:#F8F4ED;--bg-card:#FCFAF5;--text:#3B3D3F;--text-light:#68655F;--text-muted:#8A847A;--border:#E3DED2;--accent:#537D96;--accent-hover:#42657B;--accent-light:rgba(83,125,150,.1);--overlay-subtle:rgba(59,61,63,.04);--font-serif:Georgia,'Songti SC','Noto Serif CJK SC',serif;--font-ui:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans','Malgun Gothic',sans-serif;--font-mono:ui-monospace,SFMono-Regular,monospace;--radius-card:12px;--control-radius:8px;--corner-radius-scale:1}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg-card);color:var(--text);font-family:var(--font-serif);font-size:15px;line-height:1.6}button,input,textarea{font:inherit}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent)!important;outline-offset:2px}[hidden]{display:none!important}
+html[data-card-sizing="viewport"] body{overflow:auto}
+html[data-card-sizing="viewport"] .weather-hero{max-height:calc(100% - 180px);min-height:180px}
+</style>
+<script type="application/json" data-card-state>{"uiLanguage":"zh","title":"慢一点的周日","items":[{"text":"带上一本笔记本","done":true},{"text":"沿江散步","done":false},{"text":"留一点发呆的时间","done":false}]}</script>
+<script>
+if(window.parent===window){
+  window.card.state.get().then(function(envelope){
+    if(envelope.ok && Object.keys(envelope.result.state || {}).length === 0){
+      return window.card.state.set(JSON.parse(document.querySelector('[data-card-state]').textContent));
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded',function(){
+  var text=window.parent===window ? "保存在本地浏览器 · 可分享完整卡片包" : "网页演示 · 编辑保留至本页刷新";
+  if(text){var p=document.createElement('p');p.textContent=text;p.style.cssText='font:11px/1.5 var(--font-ui);color:var(--text-muted);margin:0;padding:8px 20px 12px;flex:none';document.body.appendChild(p)}
+});
+</script></head>
+<body>
+<script type="application/json" data-card-manifest>
+{"spec":"1.0","stateSchema":{"type":"object","properties":{"title":{"type":"string"},"items":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"done":{"type":"boolean"}}}}}}}
+</script>
+<h2 id="todo-card-label" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap">To-do card</h2>
+<style>
+.card-column{font-family:var(--font-ui)}
+.todo-heading{display:flex;align-items:center;gap:12px;margin:24px 0 20px}
+.todo-heading input{flex:1;min-width:0}
+.todo-heading #todo-title{font-size:26px;line-height:1.3}
+#todo-progress{font-size:12px;color:var(--accent);background:var(--overlay-subtle,rgba(0,0,0,0.03));padding:5px 9px;border-radius:calc(8px * var(--corner-radius-scale,1));corner-shape:squircle;white-space:nowrap}
+.todo-list{list-style:none;padding:0;margin:0}
+.todo-item{display:flex;align-items:center;gap:12px;padding:13px 0}
+.todo-box{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:18px;height:18px;margin:0;border:1px solid var(--border);border-radius:calc(5px * var(--corner-radius-scale, 1));corner-shape:squircle;background:var(--bg-card);cursor:pointer}
+.todo-box:checked{border-color:var(--accent);background:var(--accent)}
+.todo-box:checked:after{content:'';position:absolute;left:5px;top:2px;width:4px;height:8px;border:solid var(--bg-card);border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.todo-text{flex:1;min-width:0;font-family:var(--font-ui);font-size:14px;line-height:1.7;color:var(--text);word-break:break-word}
+.todo-done .todo-text{color:var(--text-muted);text-decoration:line-through}
+.todo-drop{flex:none;margin-top:2px;border:none;background:transparent;color:var(--text-muted);padding:2px;cursor:pointer;opacity:0;transition:opacity 0.12s ease}
+.todo-item:hover .todo-drop,.todo-drop:focus{opacity:1}
+.todo-entry{display:flex;align-items:center;gap:8px;margin-top:20px}
+.todo-field{flex:1;min-width:0;height:36px;border:1px solid var(--border);border-radius:calc(10px * var(--corner-radius-scale, 1));corner-shape:squircle;background:var(--bg-card);font-family:var(--font-ui);font-size:0.85rem;color:var(--text);padding:0 12px}
+.todo-field::placeholder{color:var(--text-muted)}
+.todo-button{display:flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;border:none;border-radius:calc(12px * var(--corner-radius-scale, 1));corner-shape:squircle;background:var(--overlay-subtle, rgba(0,0,0,0.04));color:var(--text);padding:0;font-family:var(--font-ui);font-size:1.3rem;font-weight:400;cursor:pointer}
+.todo-button:hover{background:var(--accent-light)}
+.todo-field[disabled],.todo-button[disabled]{opacity:0.45;cursor:default}
+input:focus,textarea:focus,button:focus{outline:none}
+html[data-card-sizing="viewport"],html[data-card-sizing="viewport"] body{height:100%}
+html[data-card-sizing="viewport"] body{display:flex;flex-direction:column}
+html[data-card-sizing="viewport"] .card-column{flex:1;display:flex;flex-direction:column;min-height:0}
+.card-column{max-width:512px;margin:0 auto;padding:12px 16px}
+html[data-card-sizing="viewport"] .card-column{width:100%;margin:0 auto}
+html[data-card-sizing="viewport"] .todo-list{flex:1;min-height:0;overflow-y:auto}
+</style>
+<div class="card-column">
+<div class="todo-heading">
+<input id="todo-title" data-persist="title" aria-label="List title" value="Today" style="display:block;width:100%;border:none;background:transparent;font-family:var(--font-serif);font-weight:500;color:var(--text);text-align:left;margin:0">
+<p id="todo-progress" style="flex:none;text-align:right;line-height:1.4;margin:0"></p>
+</div>
+<ul id="todo-list" class="todo-list"></ul>
+<p id="todo-empty" style="font-size:0.85rem;color:var(--text-muted);margin:0.2rem 0"></p>
+<div class="todo-entry">
+<input id="todo-field" class="todo-field" type="text" aria-label="New item" placeholder="Add an item" disabled>
+<button id="todo-add" class="todo-button" type="button" aria-label="Add" disabled>+</button>
+</div>
+<p id="todo-notice" style="font-size:0.75rem;color:var(--text-muted);margin:0.5rem 0 0"></p>
+</div>
+<script>
+(function () {
+  var ui = (function () {
+  var TEXT = {"zh":{"invalid":"此卡片的界面语言不受支持。请使用 zh、zh-TW、en、ja 或 ko。","note.card":"笔记卡片","note.title":"笔记标题","note.body":"笔记内容","note.titlePlaceholder":"标题","note.bodyPlaceholder":"输入内容…","note.stamp":"盖时间戳","note.failed":"盖章没有成功","note.pin":"钉住卡片后可盖时间戳","note.stamped":"记于 {time}","todo.card":"待办卡片","todo.title":"清单标题","todo.field":"新事项","todo.placeholder":"添加事项","todo.add":"添加","todo.empty":"清单还没有事项。","todo.pin":"钉住此卡片后可编辑","todo.remove":"移除 {text}","pomodoro.card":"番茄钟卡片","pomodoro.focus":"专注","pomodoro.break":"休息","pomodoro.start":"开始","pomodoro.pause":"暂停","pomodoro.reset":"重置","pomodoro.tally":"今天完成 {count} 个番茄","pomodoro.bellOn":"铃声开","pomodoro.bellOff":"铃声关","pomodoro.notificationTitle":"番茄钟","pomodoro.focusDone":"专注结束，休息一下","pomodoro.breakDone":"休息结束，开始专注","weather.card":"天气卡片","weather.clear":"晴","weather.cloudy":"多云","weather.overcast":"阴","weather.fog":"雾","weather.rain":"雨","weather.snow":"雪","weather.thunder":"雷","weather.wind":"风 ","weather.humidity":"湿度 ","weather.working":"正在取天气…","weather.failed":"取不到天气，稍后再试","weather.notFound":"没有找到这个地方","weather.unplaced":"告诉 Hana 这张卡要看哪里的天气","weather.host":"钉住卡片后可以取天气","weather.refresh":"刷新","weather.updated":"更新于 ","piano.card":"钢琴卡片","piano.keyboard":"两组八度键盘，C4 至 C6","data.heading":"数据面板","data.waiting":"正在等待宿主数据。","data.host":"此卡片需要宿主来显示实时数据。"},"zh-TW":{"invalid":"此卡片的介面語言不受支援。請使用 zh、zh-TW、en、ja 或 ko。","note.card":"筆記卡片","note.title":"筆記標題","note.body":"筆記內容","note.titlePlaceholder":"標題","note.bodyPlaceholder":"輸入內容…","note.stamp":"蓋時間戳","note.failed":"蓋章沒有成功","note.pin":"釘選卡片後可蓋時間戳","note.stamped":"記於 {time}","todo.card":"待辦卡片","todo.title":"清單標題","todo.field":"新增事項","todo.placeholder":"新增事項","todo.add":"新增","todo.empty":"清單還沒有事項。","todo.pin":"釘選此卡片後可編輯","todo.remove":"移除 {text}","pomodoro.card":"番茄鐘卡片","pomodoro.focus":"專注","pomodoro.break":"休息","pomodoro.start":"開始","pomodoro.pause":"暫停","pomodoro.reset":"重設","pomodoro.tally":"今天完成 {count} 個番茄","pomodoro.bellOn":"鈴聲開","pomodoro.bellOff":"鈴聲關","pomodoro.notificationTitle":"番茄鐘","pomodoro.focusDone":"專注結束，休息一下","pomodoro.breakDone":"休息結束，開始專注","weather.card":"天氣卡片","weather.clear":"晴","weather.cloudy":"多雲","weather.overcast":"陰","weather.fog":"霧","weather.rain":"雨","weather.snow":"雪","weather.thunder":"雷雨","weather.wind":"風 ","weather.humidity":"濕度 ","weather.working":"正在更新天氣…","weather.failed":"暫時無法更新天氣。","weather.notFound":"找不到這個地點。","weather.unplaced":"先告訴我想看的地點。","weather.host":"此卡片需要宿主來取得天氣。","weather.refresh":"重新整理天氣","weather.updated":"更新於 ","piano.card":"鋼琴卡片","piano.keyboard":"兩組八度鍵盤，C4 至 C6","data.heading":"資料面板","data.waiting":"正在等待宿主資料。","data.host":"此卡片需要宿主來顯示即時資料。"},"en":{"invalid":"This card has an unsupported UI language. Use zh, zh-TW, en, ja, or ko.","note.card":"Note card","note.title":"Note title","note.body":"Note body","note.titlePlaceholder":"Title","note.bodyPlaceholder":"Write something…","note.stamp":"Add timestamp","note.failed":"Could not add the timestamp","note.pin":"Pin this card to add a timestamp","note.stamped":"Recorded {time}","todo.card":"To-do card","todo.title":"List title","todo.field":"New item","todo.placeholder":"Add an item","todo.add":"Add","todo.empty":"Nothing on the list yet.","todo.pin":"Pin this card to edit","todo.remove":"Remove {text}","pomodoro.card":"Pomodoro card","pomodoro.focus":"Focus","pomodoro.break":"Break","pomodoro.start":"Start","pomodoro.pause":"Pause","pomodoro.reset":"Reset","pomodoro.tally":"{count} pomodoros completed today","pomodoro.bellOn":"Bell on","pomodoro.bellOff":"Bell off","pomodoro.notificationTitle":"Pomodoro","pomodoro.focusDone":"Focus finished. Take a break.","pomodoro.breakDone":"Break finished. Start focusing.","weather.card":"Weather card","weather.clear":"Clear","weather.cloudy":"Cloudy","weather.overcast":"Overcast","weather.fog":"Fog","weather.rain":"Rain","weather.snow":"Snow","weather.thunder":"Thunderstorm","weather.wind":"Wind ","weather.humidity":"Humidity ","weather.working":"Updating weather…","weather.failed":"Weather could not be updated.","weather.notFound":"That place could not be found.","weather.unplaced":"Tell me which place to show first.","weather.host":"This card needs a host to fetch weather.","weather.refresh":"Refresh weather","weather.updated":"Updated ","piano.card":"Piano card","piano.keyboard":"Two-octave keyboard, C4 to C6","data.heading":"Data board","data.waiting":"Waiting for host data.","data.host":"This card needs a host to show live data."},"ja":{"invalid":"このカードの UI 言語は対応していません。zh、zh-TW、en、ja、ko を使用してください。","note.card":"ノートカード","note.title":"ノートのタイトル","note.body":"ノートの内容","note.titlePlaceholder":"タイトル","note.bodyPlaceholder":"入力…","note.stamp":"日時を追加","note.failed":"日時を追加できませんでした","note.pin":"日時を追加するにはカードをピン留めしてください","note.stamped":"記録 {time}","todo.card":"To-do カード","todo.title":"リストのタイトル","todo.field":"新しい項目","todo.placeholder":"項目を追加","todo.add":"追加","todo.empty":"リストに項目はありません。","todo.pin":"編集するにはこのカードをピン留めしてください","todo.remove":"{text} を削除","pomodoro.card":"ポモドーロカード","pomodoro.focus":"集中","pomodoro.break":"休憩","pomodoro.start":"開始","pomodoro.pause":"一時停止","pomodoro.reset":"リセット","pomodoro.tally":"今日の完了ポモドーロ: {count}","pomodoro.bellOn":"ベル オン","pomodoro.bellOff":"ベル オフ","pomodoro.notificationTitle":"ポモドーロ","pomodoro.focusDone":"集中が終わりました。休憩しましょう。","pomodoro.breakDone":"休憩が終わりました。集中を始めましょう。","weather.card":"天気カード","weather.clear":"晴れ","weather.cloudy":"くもり","weather.overcast":"曇天","weather.fog":"霧","weather.rain":"雨","weather.snow":"雪","weather.thunder":"雷雨","weather.wind":"風 ","weather.humidity":"湿度 ","weather.working":"天気を更新中…","weather.failed":"天気を更新できませんでした。","weather.notFound":"その場所は見つかりませんでした。","weather.unplaced":"表示する場所を指定してください。","weather.host":"このカードは天気を取得するホストが必要です。","weather.refresh":"天気を更新","weather.updated":"更新 ","piano.card":"ピアノカード","piano.keyboard":"2 オクターブの鍵盤、C4 から C6","data.heading":"データボード","data.waiting":"ホストのデータを待っています。","data.host":"このカードにはライブデータを表示するホストが必要です。"},"ko":{"invalid":"이 카드의 UI 언어는 지원되지 않습니다. zh, zh-TW, en, ja, ko를 사용하세요.","note.card":"메모 카드","note.title":"메모 제목","note.body":"메모 내용","note.titlePlaceholder":"제목","note.bodyPlaceholder":"내용 입력…","note.stamp":"시간 추가","note.failed":"시간을 추가하지 못했습니다","note.pin":"시간을 추가하려면 카드를 고정하세요","note.stamped":"기록됨 {time}","todo.card":"할 일 카드","todo.title":"목록 제목","todo.field":"새 항목","todo.placeholder":"항목 추가","todo.add":"추가","todo.empty":"목록에 항목이 없습니다.","todo.pin":"편집하려면 이 카드를 고정하세요","todo.remove":"{text} 삭제","pomodoro.card":"포모도로 카드","pomodoro.focus":"집중","pomodoro.break":"휴식","pomodoro.start":"시작","pomodoro.pause":"일시 정지","pomodoro.reset":"재설정","pomodoro.tally":"오늘 완료한 포모도로 {count}개","pomodoro.bellOn":"벨 켜짐","pomodoro.bellOff":"벨 꺼짐","pomodoro.notificationTitle":"포모도로","pomodoro.focusDone":"집중 시간이 끝났습니다. 휴식하세요.","pomodoro.breakDone":"휴식 시간이 끝났습니다. 집중을 시작하세요.","weather.card":"날씨 카드","weather.clear":"맑음","weather.cloudy":"구름 많음","weather.overcast":"흐림","weather.fog":"안개","weather.rain":"비","weather.snow":"눈","weather.thunder":"뇌우","weather.wind":"바람 ","weather.humidity":"습도 ","weather.working":"날씨 업데이트 중…","weather.failed":"날씨를 업데이트할 수 없습니다.","weather.notFound":"그 장소를 찾을 수 없습니다.","weather.unplaced":"표시할 장소를 먼저 알려주세요.","weather.host":"이 카드에는 날씨를 가져올 호스트가 필요합니다.","weather.refresh":"날씨 새로고침","weather.updated":"업데이트 ","piano.card":"피아노 카드","piano.keyboard":"C4부터 C6까지 두 옥타브 키보드","data.heading":"데이터 보드","data.waiting":"호스트 데이터를 기다리는 중입니다.","data.host":"이 카드에는 실시간 데이터를 표시할 호스트가 필요합니다."}};
+  var LEGACY = "en";
+  var snapshot = null;
+  var node = document.querySelector('script[type="application/json"][data-card-state]');
+  if (node) { try { snapshot = JSON.parse(node.textContent || ''); } catch (_) {} }
+  var supplied = !!(snapshot && typeof snapshot === 'object' && Object.prototype.hasOwnProperty.call(snapshot, 'uiLanguage'));
+  var raw = supplied ? snapshot.uiLanguage : LEGACY;
+function canonicalize(value) {
+    if (typeof value !== 'string') return null;
+    var normalized = value.trim().replace(/_/g, '-').toLowerCase();
+    if (normalized === 'zh' || /^zh-(hans|cn|sg)(-|$)/.test(normalized)) return 'zh';
+    if (normalized === 'zh-tw' || /^zh-(hant|hk)(-|$)/.test(normalized)) return 'zh-TW';
+    if (normalized === 'en' || normalized.indexOf('en-') === 0) return 'en';
+    if (normalized === 'ja' || normalized.indexOf('ja-') === 0) return 'ja';
+    if (normalized === 'ko' || normalized.indexOf('ko-') === 0) return 'ko';
+    return null;
+}
+  var language = canonicalize(raw);
+  var invalid = supplied && !language;
+  var strings = TEXT[language || LEGACY];
+  if (supplied && language) document.documentElement.lang = language;
+function t(key, values) {
+    if (!Object.prototype.hasOwnProperty.call(strings, key)) throw new Error('Missing recipe UI text: ' + key);
+    var text = strings[key];
+    if (!values) return text;
+    return text.replace(/\{([^}]+)\}/g, function (_, name) {
+      return Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : '';
+    });
+}
+function showError() {
+    var root = document.body || document.documentElement;
+    if (!root || document.querySelector('[data-recipe-ui-language-error]')) return;
+    var message = document.createElement('p');
+    message.setAttribute('data-recipe-ui-language-error', '');
+    message.setAttribute('role', 'alert');
+    message.style.cssText = 'margin:16px;font-family:system-ui,sans-serif;color:var(--text,#2A2622);';
+    message.textContent = TEXT.en.invalid;
+    root.insertBefore(message, root.firstChild);
+}
+  return { language: language || LEGACY, explicit: supplied, invalid: invalid, t: t, showError: showError };
+})();
+  if (ui.invalid) { ui.showError(); return; }
+  var REMOVE_ICON = '<svg viewBox="0 0 12 12" aria-hidden="true" style="width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1"><path d="M3.5 3.5 8.5 8.5"></path><path d="M8.5 3.5 3.5 8.5"></path></svg>';
+  var DEFAULT_ITEMS = [
+    { text: "Reply to the message from yesterday", done: true },
+    { text: "Draft the outline", done: false },
+    { text: "Water the plants", done: false }
+  ];
+  var api = window.card;
+  var list = document.getElementById('todo-list');
+  var progress = document.getElementById('todo-progress');
+  var empty = document.getElementById('todo-empty');
+  var field = document.getElementById('todo-field');
+  var addButton = document.getElementById('todo-add');
+  var notice = document.getElementById('todo-notice');
+  var items = normalizeItems(DEFAULT_ITEMS);
+  var editable = false;
+  var requiresPin = false;
+  var loaded = false;
+  var trackAvailable = false;
+  document.getElementById('todo-card-label').textContent = ui.t('todo.card');
+  var todoTitle = document.getElementById('todo-title');
+  todoTitle.setAttribute('aria-label', ui.t('todo.title'));
+  field.setAttribute('aria-label', ui.t('todo.field'));
+  field.setAttribute('placeholder', ui.t('todo.placeholder'));
+  addButton.setAttribute('aria-label', ui.t('todo.add'));
+  function normalizeItems(source) {
+    var out = [];
+    if (Object.prototype.toString.call(source) !== '[object Array]') return out;
+    for (var i = 0; i < source.length; i += 1) {
+      var entry = source[i];
+      if (!entry || typeof entry !== 'object') continue;
+      var text = typeof entry.text === 'string' ? entry.text.trim() : '';
+      if (text) out.push({ text: text, done: entry.done === true });
+    }
+    return out;
+  }
+  function persist() {
+    if (!editable || !api || !api.state) return;
+    var pending = api.state.set('items', items);
+    if (pending && typeof pending.catch === 'function') pending.catch(function () {});
+  }
+  function recordList(name, payload) {
+    if (!trackAvailable) return;
+    if (!window.card || typeof window.card.track !== 'function') return;
+    var pending = window.card.track(name, payload);
+    if (pending && typeof pending.catch === 'function') pending.catch(function () {});
+  }
+  function toggleItem(index) {
+    var entry = items[index];
+    if (!entry) return;
+    items = items.slice();
+    items[index] = { text: entry.text, done: !entry.done };
+    persist();
+    recordList('toggle', { text: items[index].text, done: items[index].done });
+    render();
+  }
+  function removeItem(index) {
+    if (!editable) return;
+    var removed = items[index];
+    items = items.slice(0, index).concat(items.slice(index + 1));
+    persist();
+    recordList('remove', { text: removed ? removed.text : '' });
+    render();
+  }
+  function addItem() {
+    if (!editable) return;
+    var text = field.value.trim();
+    if (!text) return;
+    items = items.concat([{ text: text, done: false }]);
+    field.value = '';
+    persist();
+    recordList('add', { text: text });
+    render();
+  }
+  function buildRow(entry, index) {
+    var row = document.createElement('li');
+    row.className = entry.done ? 'todo-item todo-done' : 'todo-item';
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'todo-box';
+    box.checked = entry.done;
+    box.setAttribute('aria-label', entry.text);
+    box.addEventListener('change', function () { toggleItem(index); });
+    var label = document.createElement('span');
+    label.className = 'todo-text';
+    label.textContent = entry.text;
+    row.appendChild(box);
+    row.appendChild(label);
+    if (editable) {
+      var drop = document.createElement('button');
+      drop.type = 'button';
+      drop.className = 'todo-drop';
+      drop.setAttribute('aria-label', ui.t('todo.remove', { text: entry.text }));
+      drop.innerHTML = REMOVE_ICON;
+      drop.addEventListener('click', function () { removeItem(index); });
+      row.appendChild(drop);
+    }
+    return row;
+  }
+  function render() {
+    while (list.firstChild) list.removeChild(list.firstChild);
+    var done = 0;
+    for (var i = 0; i < items.length; i += 1) {
+      if (items[i].done) done += 1;
+      list.appendChild(buildRow(items[i], i));
+    }
+    progress.textContent = items.length ? done + ' / ' + items.length : '';
+    empty.textContent = items.length || !loaded ? '' : ui.t('todo.empty');
+    field.disabled = !editable;
+    addButton.disabled = !editable;
+    notice.textContent = requiresPin ? ui.t('todo.pin') : '';
+  }
+  addButton.addEventListener('click', addItem);
+  field.addEventListener('keydown', function (event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    addItem();
+  });
+  render();
+  if (api && typeof api.capabilities === 'function') {
+    api.capabilities().then(function (envelope) {
+      var result = envelope && envelope.ok === true ? envelope.result : null;
+      var capabilities = result && result.capabilities ? result.capabilities : null;
+      var word = capabilities && typeof capabilities.state === 'string' ? capabilities.state : '';
+      editable = word === 'available' || word === 'local_fallback';
+      requiresPin = word === 'requires_pin';
+      var trackEntry = capabilities && capabilities.track;
+      var trackStatus = trackEntry && typeof trackEntry === 'object' ? trackEntry.status : '';
+      trackAvailable = trackStatus === 'available' || trackStatus === 'local_fallback';
+      render();
+    }, function () { render(); });
+  }
+  if (api && api.state && typeof api.state.get === 'function') {
+    api.state.get().then(function (envelope) {
+      var result = envelope && envelope.ok === true ? envelope.result : null;
+      var stored = result && result.state ? result.state.items : null;
+      loaded = true;
+      if (Object.prototype.toString.call(stored) === '[object Array]') items = normalizeItems(stored);
+      render();
+    }, function () { loaded = true; render(); });
+  } else {
+    loaded = true;
+    render();
+  }
+})();
+</script>
+</body>
+</html>

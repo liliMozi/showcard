@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-passive-placeholder">
+<title>Passive resource placeholder probe</title>
+</head>
+<body>
+<p data-probe-static>A card may write a URL on an image. A host must not fetch it.</p>
+<figure>
+  <img id="probe-image" width="320" height="180"
+       src="https://cdn.example.com/showcard-probe-photograph.png"
+       alt="A photograph the card referenced by URL">
+</figure>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  // Suite convention (see conformance/README.md): the node standing in for a
+  // blocked resource carries this attribute. Section 7.1 leaves the shape of a
+  // placeholder to the host, so the suite pins a marker rather than a look.
+  var MARKER = 'data-card-placeholder';
+
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+  function placeholder() { return document.querySelector('[' + MARKER + ']'); }
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+  // Section 1.2 / 7.1: the reference is legal to write and must not load. This
+  // judgment is a floor and says so — it cannot tell "the host blocked it" from
+  // "the address was unreachable anyway", and it must not go to the network to
+  // find out. What it does catch is the host that let the fetch through.
+  function checkNotLoaded() {
+    var image = document.getElementById('probe-image');
+    if (!image) {
+      say('passive-reference-not-loaded', true,
+        'the referenced image is gone from the document, so nothing was loaded into it');
+      return;
+    }
+    var width = image.naturalWidth || 0;
+    var height = image.naturalHeight || 0;
+    say('passive-reference-not-loaded', width === 0 && height === 0,
+      width === 0 && height === 0
+        ? 'the referenced image has no intrinsic size: nothing came off the network'
+        : 'the referenced image loaded at ' + width + 'x' + height + '; the host fetched a URL it was told to block');
+  }
+
+  // Section 7.1: what the reader is shown in place of a blocked resource. The
+  // error event is fired here rather than waited for, because a suite that
+  // needed a real failed fetch would need a network to prove a card works
+  // without one; `dispatchEvent` walks the same capture path the platform's own
+  // resource error walks.
+  function checkPlaceholder() {
+    if (placeholder()) {
+      say('blocked-resource-placeholder', true, 'the host had already put a placeholder in the resource’s place');
+      return Promise.resolve();
+    }
+    var image = document.getElementById('probe-image');
+    if (!image) {
+      say('blocked-resource-placeholder', false,
+        'the referenced image was removed and nothing was put in its place');
+      return Promise.resolve();
+    }
+    image.dispatchEvent(new Event('error'));
+    return wait(20).then(function () {
+      var stand = placeholder();
+      if (!stand) {
+        say('blocked-resource-placeholder', false,
+          'the resource failed and the reader was left with whatever the browser draws for a dead image');
+        return;
+      }
+      var text = stand.textContent || '';
+      say('blocked-resource-placeholder', text.indexOf('A photograph the card referenced by URL') !== -1,
+        text.indexOf('A photograph the card referenced by URL') !== -1
+          ? 'a placeholder stands in the resource’s place and carries its alternative text'
+          : 'a placeholder stands in the resource’s place but drops the alternative text section 7.1 asks for');
+    });
+  }
+
+  function main() {
+    checkNotLoaded();
+    return checkPlaceholder();
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

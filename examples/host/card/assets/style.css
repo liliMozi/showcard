@@ -1,0 +1,27 @@
+:root {
+  color-scheme: light;
+  --paper: #fcfaf5;
+  --ink: #2d2924;
+  --muted: #72695e;
+  --rule: #dfd7cb;
+  --accent: #537d96;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.55 Georgia, "Times New Roman", serif;
+}
+
+.card { padding: 28px; max-width: 640px; margin: 0 auto; }
+.eyebrow { margin: 0; color: var(--muted); font: 12px/1.4 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+h1 { margin: 10px 0 22px; font-size: 30px; font-weight: 500; }
+label { display: block; margin-bottom: 8px; color: var(--muted); font: 13px/1.4 system-ui, sans-serif; }
+textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--rule); border-radius: 8px; padding: 12px; color: inherit; background: #fffdf9; font: inherit; }
+.actions { display: grid; gap: 12px; margin-top: 18px; }
+button { justify-self: start; border: 0; border-radius: 7px; padding: 9px 13px; color: white; background: var(--accent); font: 14px/1.2 system-ui, sans-serif; cursor: pointer; }
+button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+output { min-height: 1.5em; color: var(--muted); font: 13px/1.45 ui-monospace, SFMono-Regular, monospace; }

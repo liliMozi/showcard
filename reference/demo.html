@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>showcard reference host - demo</title>
+<style>
+  body { font: 15px/1.6 system-ui, sans-serif; margin: 0 auto; max-width: 46rem; padding: 2rem 1.25rem; color: #222; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  p { margin: .5rem 0; }
+  .note { border: 1px solid #d9d2c5; background: #faf7f1; padding: .75rem 1rem; margin: 1rem 0; }
+  .stage { border: 1px solid #ddd; margin-top: 1rem; }
+  iframe { width: 100%; height: 20rem; border: 0; display: block; }
+  code { background: #f3f1ec; padding: .1rem .3rem; }
+</style>
+</head>
+<body>
+
+<h1>showcard reference host</h1>
+<p>
+  The card below runs inside a sandboxed iframe. Everything it can do goes through
+  the five entry points on <code>window.card</code>: the counter keeps its value in
+  host-held state, the button calls a tool binding the manifest declares, and the
+  panel underneath shows the result the host sent back.
+</p>
+<p>
+  The card holds none of that itself. State lives out here, keyed by the card's id,
+  in the memory store this page passes in; swap in the local storage store and the
+  same card survives a reload without changing a line of its markup.
+</p>
+
+<div class="note" id="module-note">
+  <strong>Not loaded yet.</strong> This page loads the shim as ES modules, which
+  browsers refuse to read straight off the disk. Serve this folder over HTTP
+  (any static file server will do) and open the page from there.
+</div>
+
+<div class="stage" id="stage"></div>
+
+<script type="module">
+  import { mountCard, createMemoryStateStore } from './src/host.js';
+
+  document.getElementById('module-note').remove();
+
+  // A card's entry is a complete document the author wrote in full (section
+  // 1.1) — its own doctype, its own head, its own body. The host adds
+  // nothing to the file; it only injects a runtime layer into the bytes it
+  // serves (section 2.2), which mountCard does here for the srcdoc it hands
+  // the iframe.
+  const cardDocument = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Reading log</title>
+<script type="application/json" data-card-manifest>
+{
+  "spec": "1.0",
+  "toolBindings": {
+    "summarize": { "tool": "demo.summarize", "description": "Summarize the reading log" }
+  }
+}
+<\/script>
+<style>
+  body { font: 15px/1.6 system-ui, sans-serif; margin: 0; padding: 1rem 1.25rem; color: #222; }
+  h2 { font-size: 1.1rem; margin: 0 0 .75rem; }
+  label { display: block; margin: .5rem 0; }
+  input { font: inherit; padding: .25rem .4rem; width: 6rem; }
+  button { font: inherit; padding: .3rem .9rem; }
+  pre { background: #f3f1ec; padding: .6rem .8rem; white-space: pre-wrap; min-height: 2.5rem; }
+</style>
+</head>
+<body>
+
+<h2>Reading log</h2>
+<form>
+  <label>Pages read today
+    <input type="number" name="pages" data-persist="pages" value="0">
+  </label>
+  <button data-invoke="summarize">Ask the host</button>
+</form>
+<pre data-result="summarize"></pre>
+
+</body>
+</html>`;
+
+  mountCard({
+    container: document.getElementById('stage'),
+    cardId: 'demo-reading-log',
+    cardSource: cardDocument,
+    // State lives here, keyed by card id. Swap in createLocalStorageStateStore
+    // to have it survive a browser restart.
+    stateStore: createMemoryStateStore(),
+    // A stand-in gateway. A real host would run the declared tool here, after
+    // applying whatever policy it owes the user.
+    executeBinding: ({ bindingId, binding, input }) => ({
+      binding: bindingId,
+      tool: binding.tool,
+      pagesReported: input && input.pages ? input.pages : '0',
+      answer: 'The host executed the binding and sent this back through the envelope.',
+    }),
+  });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-sugar-result">
+<title>Declarative result probe</title>
+<script type="application/json" data-card-manifest>
+{
+  "spec": "1.0",
+  "toolBindings": {
+    "echo": { "tool": "conformance.echo", "description": "echoes its input back" }
+  }
+}
+</script>
+</head>
+<body>
+<p data-probe-static>A container marked with a binding shows that binding's latest result.</p>
+<button data-invoke="echo">Run</button>
+<div id="out" data-result="echo"></div>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+  // Section 2.7: the container takes the result as text. The specification does
+  // not say in what shape, so the probe judges "empty before, filled after"
+  // rather than an exact string — the wording is the host's to choose.
+  function main() {
+    var out = document.getElementById('out');
+    var before = out.textContent;
+    document.querySelector('[data-invoke]').click();
+    return wait(60).then(function () {
+      var after = out.textContent;
+      say('sugar-result', before === '' && after !== '',
+        'the container went from ' + JSON.stringify(before) + ' to ' + JSON.stringify(after));
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

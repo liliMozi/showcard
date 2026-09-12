@@ -1,0 +1,4 @@
+node_modules/
+.DS_Store
+packages/showcard/vendor/
+packages/showcard/*.tgz

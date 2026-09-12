@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-state-budget">
+<title>State budget probe</title>
+</head>
+<body>
+<p data-probe-static>An over-budget write is refused outright; nothing is quietly cut down to fit.</p>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+
+  // Section 2.5: over 64 KiB serialized must answer CARD_HOST_STATE_TOO_LARGE,
+  // and truncating instead is forbidden. Built at runtime rather than written
+  // into the file, so the probe card stays inside its own size budget.
+  function main() {
+    var oversized = new Array(70000).join('x');
+    return window.card.state.set('keeper', 'intact').then(function () {
+      return window.card.state.set('oversized', oversized);
+    }).then(function (envelope) {
+      say('state-budget-refused',
+        !!envelope && envelope.ok === false && envelope.code === 'CARD_HOST_STATE_TOO_LARGE',
+        'the over-budget write answered ' + JSON.stringify(envelope && (envelope.code || envelope.ok)));
+      return window.card.state.get();
+    }).then(function (envelope) {
+      var state = (envelope && envelope.result && envelope.result.state) || {};
+      say('state-budget-no-truncation',
+        state.keeper === 'intact' && state.oversized === undefined,
+        'after the refusal the state holds ' + JSON.stringify(Object.keys(state)));
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

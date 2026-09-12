@@ -1,0 +1,31 @@
+{
+  "name": "showcard",
+  "version": "0.9.2",
+  "description": "CLI for the showcard specification: validate card files, run the conformance probe suite against a host adapter, and smoke-mount a card in a headless reference host.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "homepage": "https://showcard.org",
+  "bin": {
+    "showcard": "./bin/showcard.js"
+  },
+  "files": [
+    "bin/showcard.js",
+    "vendor",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "node scripts/assemble.mjs"
+  },
+  "dependencies": {
+    "jsdom": "29.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liliMozi/showcard.git",
+    "directory": "packages/showcard"
+  }
+}

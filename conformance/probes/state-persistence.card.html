@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-state-persistence">
+<title>State persistence probe</title>
+</head>
+<body>
+<p data-probe-static>State belongs to the card, so it has to outlive one mount of it.</p>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+
+  // Section 9.1 (L1: state kept per card id): this probe runs twice. The first
+  // mount leaves a marker and reports "not yet"; the driver remounts the card
+  // and reads the second mount, which passes only if the marker survived.
+  function main() {
+    return window.card.state.get('phase').then(function (envelope) {
+      if (!envelope || envelope.ok !== true) {
+        say('state-persistence', false,
+          'state.get failed with ' + JSON.stringify(envelope && envelope.code));
+        return;
+      }
+      if (envelope.result.value === 'written') {
+        say('state-persistence', true, 'the value written before the remount was still there');
+        return;
+      }
+      return window.card.state.set('phase', 'written').then(function (written) {
+        say('state-persistence', false, written && written.ok === true
+          ? 'first mount: the marker is written and the card is waiting to be remounted'
+          : 'first mount: the write failed with ' + JSON.stringify(written && written.code));
+      });
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

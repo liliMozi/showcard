@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-capabilities-shape">
+<title>Capabilities shape probe</title>
+</head>
+<body>
+<p data-probe-static>Asking the way: a card has to be able to find out where it is.</p>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+  function oneOf(value, allowed) {
+    for (var i = 0; i < allowed.length; i++) { if (allowed[i] === value) { return true; } }
+    return false;
+  }
+
+  // Section 3.1: the required fields, and the state words each one may take.
+  // The dual-gradient revision (section 3.2) retired invoke's pin-conditioned
+  // word: execution eligibility no longer keys off pin, so only two words
+  // remain in the capabilities() vocabulary.
+  function main() {
+    return window.card.capabilities().then(function (envelope) {
+      say('capabilities-envelope', envelope && envelope.ok === true,
+        'capabilities() answered ' + JSON.stringify(envelope && envelope.ok));
+      var result = (envelope && envelope.result) || {};
+      say('capabilities-environment', oneOf(result.environment, ['host', 'standalone']),
+        'environment is ' + JSON.stringify(result.environment));
+      var capabilities = result.capabilities || {};
+      say('capabilities-state-word', oneOf(capabilities.state, ['available', 'local_fallback']),
+        'the state word is ' + JSON.stringify(capabilities.state));
+      say('capabilities-invoke-word',
+        oneOf(capabilities.invoke, ['available', 'requires_host']),
+        'the invoke word is ' + JSON.stringify(capabilities.invoke));
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

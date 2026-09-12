@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-envelope-shape">
+<title>Envelope shape probe</title>
+</head>
+<body>
+<p data-probe-static>Every failure has to come back as an envelope, never as a thrown error.</p>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+  function isFailureEnvelope(envelope) {
+    return !!envelope && typeof envelope === 'object' && envelope.ok === false &&
+      typeof envelope.code === 'string' && envelope.code !== '';
+  }
+
+  // Sections 2.4 and 9.6: no failure path throws, no failure path rejects, and
+  // every failure names a code.
+  function main() {
+    var call = window.card.request('conformance.no.such.capability', { probe: true });
+    if (!call || typeof call.then !== 'function') {
+      say('envelope-shape-promise', false, 'request did not return a promise');
+      return null;
+    }
+    say('envelope-shape-promise', true, 'request returned a promise');
+
+    return call.then(function (envelope) {
+      say('envelope-shape-resolves', true, 'an unknown capability resolved instead of rejecting');
+      say('envelope-shape-failure', isFailureEnvelope(envelope), 'the answer was ' + JSON.stringify(envelope));
+      return window.card.invoke('');
+    }, function (reason) {
+      say('envelope-shape-resolves', false, 'the call rejected with ' + reason);
+      say('envelope-shape-failure', false, 'no envelope was delivered');
+      say('envelope-shape-bad-argument', false, 'skipped after the rejection');
+    }).then(function (envelope) {
+      if (envelope === undefined) { return; }
+      say('envelope-shape-bad-argument', isFailureEnvelope(envelope),
+        'an empty binding id answered ' + JSON.stringify(envelope && envelope.code));
+    }, function (reason) {
+      say('envelope-shape-bad-argument', false, 'an empty binding id rejected with ' + reason);
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

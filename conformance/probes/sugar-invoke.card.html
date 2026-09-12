@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-sugar-invoke">
+<title>Declarative invoke probe</title>
+<script type="application/json" data-card-manifest>
+{
+  "spec": "1.0",
+  "toolBindings": {
+    "echo": { "tool": "conformance.echo", "description": "echoes its input back" }
+  }
+}
+</script>
+</head>
+<body>
+<p data-probe-static>A button inside a form sends the form's fields to the binding, with no script of its own.</p>
+<form id="entry">
+  <label>Ticket <input name="ticket" value="A-1729"></label>
+  <button type="submit" data-invoke="echo">Send</button>
+</form>
+<div id="echo-result" data-result="echo"></div>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+  // Section 2.7: data-invoke on an element inside a form serializes the form
+  // into the binding's input. Judged through the echo binding the suite's
+  // adapters wire up, so the field value has to come back out.
+  function main() {
+    document.querySelector('[data-invoke]').click();
+    return wait(60).then(function () {
+      var text = document.getElementById('echo-result').textContent;
+      say('sugar-invoke', text.indexOf('A-1729') >= 0,
+        'the result container reads ' + JSON.stringify(text));
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

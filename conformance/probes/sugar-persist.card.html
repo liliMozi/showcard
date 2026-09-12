@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-sugar-persist">
+<title>Declarative persistence probe</title>
+</head>
+<body>
+<p data-probe-static>A field marked to persist writes itself into the card's state.</p>
+<label>Note <input id="note" data-persist="note"></label>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+  // Section 2.7: data-persist reads and writes the matching state key. The read
+  // half is covered by the state-persistence probe across a remount; this one
+  // covers the write half, judged through the public state API.
+  function main() {
+    var field = document.getElementById('note');
+    field.value = 'typed into the card';
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    return wait(60).then(function () {
+      return window.card.state.get('note');
+    }).then(function (envelope) {
+      var value = envelope && envelope.result ? envelope.result.value : undefined;
+      say('sugar-persist', envelope.ok === true && value === 'typed into the card',
+        'the host holds ' + JSON.stringify(value));
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

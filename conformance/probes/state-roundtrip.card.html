@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-state-roundtrip">
+<title>State roundtrip probe</title>
+</head>
+<body>
+<p data-probe-static>Writing state and reading it back, one key at a time and all at once.</p>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+
+  // Section 2.3 / 2.5: set(key, value), set(wholeObject), get(key), get().
+  function main() {
+    return window.card.state.set('note', 'first').then(function (envelope) {
+      say('state-set-key', envelope && envelope.ok === true,
+        'set(key, value) answered ' + JSON.stringify(envelope && (envelope.ok || envelope.code)));
+      return window.card.state.get('note');
+    }).then(function (envelope) {
+      var value = envelope && envelope.result ? envelope.result.value : undefined;
+      say('state-get-key', envelope.ok === true && value === 'first',
+        'get(key) read back ' + JSON.stringify(value));
+      return window.card.state.set({ note: 'second', count: 2 });
+    }).then(function (envelope) {
+      say('state-set-object', envelope && envelope.ok === true,
+        'set(wholeObject) answered ' + JSON.stringify(envelope && (envelope.ok || envelope.code)));
+      return window.card.state.get();
+    }).then(function (envelope) {
+      var state = (envelope && envelope.result && envelope.result.state) || {};
+      say('state-get-all', envelope.ok === true && state.note === 'second' && state.count === 2,
+        'get() read back ' + JSON.stringify(state));
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

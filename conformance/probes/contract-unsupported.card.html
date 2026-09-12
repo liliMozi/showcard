@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-contract-unsupported">
+<title>Contract version probe</title>
+<script type="application/json" data-card-manifest>
+{
+  "spec": "9.9",
+  "toolBindings": {
+    "echo": { "tool": "conformance.echo", "description": "echoes its input back" }
+  }
+}
+</script>
+</head>
+<body>
+<p data-probe-static>This card claims a contract version no host of today implements. It still has to open.</p>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+
+  // Section 6.5 / 9.6: a host never refuses to open a file over its version. It
+  // renders the document (the driver checks that from outside) and answers the
+  // socket with CARD_HOST_CONTRACT_UNSUPPORTED.
+  function main() {
+    return window.card.state.get().then(function (envelope) {
+      say('contract-unsupported-state',
+        !!envelope && envelope.ok === false && envelope.code === 'CARD_HOST_CONTRACT_UNSUPPORTED',
+        'state.get answered ' + JSON.stringify(envelope && (envelope.code || envelope.ok)));
+      return window.card.invoke('echo', { declared: true });
+    }).then(function (envelope) {
+      say('contract-unsupported-invoke',
+        !!envelope && envelope.ok === false && envelope.code === 'CARD_HOST_CONTRACT_UNSUPPORTED',
+        'invoke answered ' + JSON.stringify(envelope && (envelope.code || envelope.ok)));
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

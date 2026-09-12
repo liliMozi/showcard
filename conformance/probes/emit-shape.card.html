@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="card-id" content="probe-emit-shape">
+<title>Emit shape probe</title>
+</head>
+<body>
+<p data-probe-static>A completed user interaction is reported one way; the call always resolves an envelope.</p>
+<ul id="probe-results" data-probe-status="running"></ul>
+<script>
+(function () {
+  var list = document.getElementById('probe-results');
+  function say(name, pass, detail) {
+    var item = document.createElement('li');
+    item.setAttribute('data-probe', name);
+    item.setAttribute('data-verdict', pass ? 'pass' : 'fail');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  function finish(error) {
+    if (error) { say('probe-script', false, 'the probe failed: ' + error); }
+    list.setAttribute('data-probe-status', 'done');
+  }
+  function oneOf(value, allowed) {
+    for (var i = 0; i < allowed.length; i++) { if (allowed[i] === value) { return true; } }
+    return false;
+  }
+  function isEnvelope(envelope) {
+    return !!envelope && typeof envelope === 'object' && typeof envelope.ok === 'boolean' &&
+      (envelope.ok === true || (typeof envelope.code === 'string' && envelope.code !== ''));
+  }
+  function isFailureEnvelope(envelope) {
+    return !!envelope && typeof envelope === 'object' && envelope.ok === false &&
+      typeof envelope.code === 'string' && envelope.code !== '';
+  }
+
+  // Section 2.3: emit is a named convenience. A legal call resolves an
+  // envelope; an illegal name resolves ok: false and never throws or rejects.
+  // Section 3.1: capabilities().emit is available or requires_host.
+  function main() {
+    say('emit-is-function', typeof window.card.emit === 'function',
+      'window.card.emit is ' + typeof window.card.emit);
+    if (typeof window.card.emit !== 'function') {
+      say('emit-legal-envelope', false, 'emit is not a function');
+      say('emit-to-echoed', false, 'emit is not a function');
+      say('emit-illegal-name', false, 'emit is not a function');
+      return window.card.capabilities().then(function (envelope) {
+        var word = envelope && envelope.result && envelope.result.capabilities &&
+          envelope.result.capabilities.emit;
+        say('emit-capability-word', oneOf(word, ['available', 'requires_host']),
+          'the emit word is ' + JSON.stringify(word));
+      });
+    }
+
+    var call = window.card.emit('probe.clicked', { n: 1 });
+    if (!call || typeof call.then !== 'function') {
+      say('emit-legal-envelope', false, 'emit did not return a promise');
+      say('emit-to-echoed', false, 'emit did not return a promise');
+      return null;
+    }
+
+    return call.then(function (envelope) {
+      say('emit-legal-envelope', isEnvelope(envelope),
+        'a legal emit answered ' + JSON.stringify(envelope && { ok: envelope.ok, code: envelope.code }));
+      return window.card.emit('probe.clicked', { n: 1 }, 'sess_elsewhere');
+    }, function (reason) {
+      say('emit-legal-envelope', false, 'a legal emit rejected with ' + reason);
+      say('emit-to-echoed', false, 'skipped after the rejection');
+      say('emit-illegal-name', false, 'skipped after the rejection');
+    }).then(function (envelope) {
+      if (envelope === undefined) { return; }
+      var echoed = envelope && envelope.ok === true && envelope.result &&
+        envelope.result.to === 'sess_elsewhere';
+      say('emit-to-echoed', echoed,
+        'a wire carrying to answered ' + JSON.stringify(envelope && envelope.result));
+      return window.card.emit('NOT VALID');
+    }, function (reason) {
+      say('emit-to-echoed', false, 'an emit carrying to rejected with ' + reason);
+      return window.card.emit('NOT VALID');
+    }).then(function (envelope) {
+      if (envelope === undefined) { return; }
+      say('emit-illegal-name', isFailureEnvelope(envelope),
+        'an illegal name answered ' + JSON.stringify(envelope && envelope.code));
+      return window.card.capabilities();
+    }, function (reason) {
+      say('emit-illegal-name', false, 'an illegal name rejected with ' + reason);
+      return window.card.capabilities();
+    }).then(function (envelope) {
+      if (envelope === undefined) { return; }
+      var word = envelope && envelope.result && envelope.result.capabilities &&
+        envelope.result.capabilities.emit;
+      say('emit-capability-word', oneOf(word, ['available', 'requires_host']),
+        'the emit word is ' + JSON.stringify(word));
+    });
+  }
+
+  function start() {
+    try {
+      Promise.resolve(main()).then(function () { finish(); }, finish);
+    } catch (error) {
+      finish(error);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>
