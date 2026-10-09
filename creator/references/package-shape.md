@@ -8,6 +8,7 @@ the only thing that marks it as a recipe is one frontmatter line.
 ```
 <recipe-name>/
   SKILL.md
+  assets/icon.png                   # optional identity icon
   assets/<something>.card.html      # a template with no assets of its own
   assets/<something>/               # a template that is a full package:
     index.html                      #   its own index.html...
@@ -34,6 +35,8 @@ name: harbour-tide-table
 description: Mint a tide table card for a named harbour. Use when someone asks for tides, a tide chart, or "when is high water at ...".
 profile: card-skill
 default-enabled: false
+metadata:
+  icon: assets/icon.png
 ---
 ```
 
@@ -47,6 +50,10 @@ default-enabled: false
   package as an ordinary skill, which is exactly the intent.
 - `default-enabled: false` — a recipe an agent installed starts off. The user
   turns it on.
+- `metadata.icon` — optional. The package-relative path of a square image
+  (PNG, JPEG, WebP or static SVG) that a host may show as the recipe's
+  identity icon. Keep the file inside the package; leave the key out rather
+  than pointing it at a URL.
 
 ## SKILL.md sections
 
